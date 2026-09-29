@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.pytest_cache/
+
+# entornos virtuales
+.venv
+
+# credenciales y configuracion local
+.env
+
+# datos generados por el pipeline y datos pesados sin comprimir
+data/raw/*.csv
+data/staging/*
+!data/staging/.gitkeep
+
+# jupyter
+.ipynb_checkpoints/
+
+# logs
+logs/
+
+# resultados locales de great expectations
+gx/uncommitted/
+
+# sistema operativo
+.DS_Store
+Thumbs.db

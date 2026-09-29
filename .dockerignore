@@ -1,0 +1,10 @@
+.venv
+.git
+data/raw
+data/staging
+logs
+notebooks
+docs
+__pycache__
+*.pyc
+.env

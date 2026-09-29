@@ -1,0 +1,143 @@
+name: etl-airflow-calidad-aire
+
+x-airflow-common: &airflow-common
+  image: etl-airflow-calidad-aire:latest
+  build:
+    context: .
+    dockerfile: docker/airflow.Dockerfile
+  env_file: .env
+  working_dir: /opt/airflow/app
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db/airflow
+    AIRFLOW__API_AUTH__JWT_SECRET: etl-clima-jwt-secret-local-only
+    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: "30"
+    PROJECT_ROOT: /opt/airflow/app
+    PYTHONPATH: /opt/airflow/app
+    LOG_DIR: /opt/airflow/logs
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/app/src
+    - ./utils:/opt/airflow/app/utils
+    - ./config:/opt/airflow/app/config
+    - ./data:/opt/airflow/app/data
+    - ./dwh_version:/opt/airflow/app/dwh_version
+    - ./gx:/opt/airflow/app/gx
+    - ./test:/opt/airflow/app/test
+    - ./dags:/opt/airflow/app/dags
+    - ./logs:/opt/airflow/logs
+  depends_on: &airflow-depends
+    airflow-db:
+      condition: service_healthy
+    warehouse:
+      condition: service_healthy
+
+services:
+  airflow-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+
+  warehouse:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dwh
+      POSTGRES_PASSWORD: dwh_password
+      POSTGRES_DB: dwh
+    ports:
+      - "5433:5432"
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dwh", "-d", "dwh"]
+      interval: 5s
+      retries: 10
+
+  airflow-init:
+    <<: *airflow-common
+    command: ["airflow", "db", "migrate"]
+    user: "50000:0"
+
+  seed-source:
+    <<: *airflow-common
+    command: ["python", "-m", "src.seed_source_db"]
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: ["airflow", "api-server"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      retries: 10
+      start_period: 30s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: ["airflow", "scheduler"]
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+      seed-source:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: ["airflow", "dag-processor"]
+    depends_on:
+      <<: *airflow-depends
+      airflow-init:
+        condition: service_completed_successfully
+
+  tests:
+    <<: *airflow-common
+    profiles: ["test"]
+    command: ["python", "-m", "pytest", "test/test_quality.py", "test/test_dag.py", "-q", "-p", "no:cacheprovider"]
+    depends_on: {}
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    env_file: .env
+    working_dir: /app
+    environment:
+      PROJECT_ROOT: /app
+      PYTHONPATH: /app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./dashboard:/app/dashboard
+      - ./utils:/app/utils
+      - ./config:/app/config
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    command: ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+
+volumes:
+  airflow-db-data:
+  warehouse-data:
