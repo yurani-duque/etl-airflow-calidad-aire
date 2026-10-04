@@ -1,0 +1,22 @@
+{
+  "data": {
+    "asset": {
+      "id": "14b8958a-5327-465c-926a-cddac1c78875",
+      "name": "suite_hechos_calidad_aire"
+    },
+    "batch_definition": {
+      "id": "a45794be-f9d5-4941-bb6a-f2f527aecc61",
+      "name": "dataset_completo"
+    },
+    "datasource": {
+      "id": "a8bc7e18-56f1-4cf5-b3c6-149ea2d7cc71",
+      "name": "staging"
+    }
+  },
+  "id": "e2565397-7b5d-4ccd-8d6d-2021922e10b5",
+  "name": "validacion_suite_hechos_calidad_aire",
+  "suite": {
+    "id": "78cac613-79ed-4ce5-ae99-9d5ba371bc85",
+    "name": "suite_hechos_calidad_aire"
+  }
+}

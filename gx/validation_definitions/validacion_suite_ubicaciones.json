@@ -1,0 +1,22 @@
+{
+  "data": {
+    "asset": {
+      "id": "8cdf8fdc-42f7-45c4-92dd-3ea7be126b95",
+      "name": "suite_ubicaciones"
+    },
+    "batch_definition": {
+      "id": "10591ecc-3080-4216-bd8e-d53b56b7c171",
+      "name": "dataset_completo"
+    },
+    "datasource": {
+      "id": "a8bc7e18-56f1-4cf5-b3c6-149ea2d7cc71",
+      "name": "staging"
+    }
+  },
+  "id": "dd5a4a2e-a27c-45e4-b362-1d5abc37adda",
+  "name": "validacion_suite_ubicaciones",
+  "suite": {
+    "id": "b748938f-629d-46a2-be4c-b67b921bb6f6",
+    "name": "suite_ubicaciones"
+  }
+}

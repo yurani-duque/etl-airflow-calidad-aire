@@ -1,0 +1,231 @@
+{
+  "expectations": [
+    {
+      "id": "786057cf-65ca-4880-99fc-441bb643a448",
+      "kwargs": {
+        "max_value": 5000000,
+        "min_value": 100000
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_table_row_count_to_be_between"
+    },
+    {
+      "id": "7946b963-e704-4117-9dc2-da42cd25e45a",
+      "kwargs": {
+        "column": "location_key"
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "c134782f-1987-4d69-b9d5-e01c908f9a9e",
+      "kwargs": {
+        "column": "iso3"
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "4928959d-c8a1-4bb0-90df-1ed0695840b6",
+      "kwargs": {
+        "column": "date"
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "37a391ff-8883-4ca7-8537-f4e60e11594d",
+      "kwargs": {
+        "column": "source",
+        "value_set": [
+          "kaggle_csv",
+          "open_meteo_api"
+        ]
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_in_set"
+    },
+    {
+      "id": "a305d612-fe81-4dbf-ac24-c775f2f6bbaf",
+      "kwargs": {
+        "column_list": [
+          "location_key",
+          "date",
+          "source"
+        ]
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_compound_columns_to_be_unique"
+    },
+    {
+      "id": "7070b72c-d08c-43ea-9c5b-049fa86970ca",
+      "kwargs": {
+        "column": "humidity",
+        "max_value": 100.0,
+        "min_value": 0.0
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "a147d751-de0c-49bc-ab07-6e38da4fa6c2",
+      "kwargs": {
+        "column": "cloud",
+        "max_value": 100.0,
+        "min_value": 0.0
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "6de92a28-24d1-492b-a36b-dbd858af144c",
+      "kwargs": {
+        "column": "temperature_celsius",
+        "max_value": 60.0,
+        "min_value": -90.0
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "9e066d62-18a2-4e23-bc22-5fe473930481",
+      "kwargs": {
+        "column": "wind_kph",
+        "max_value": 500.0,
+        "min_value": 0.0,
+        "mostly": 0.999
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "ad8f7514-30ad-44c9-8bad-76430e79505b",
+      "kwargs": {
+        "column": "pressure_mb",
+        "max_value": 1100.0,
+        "min_value": 400.0,
+        "mostly": 0.999
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "914b64f0-3df2-46e2-87e8-6d694b9f5b77",
+      "kwargs": {
+        "column": "pm2_5",
+        "max_value": 1000.0,
+        "min_value": 0.0,
+        "mostly": 0.999
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "b02ca1fa-d805-4ca3-8e3f-ebd7f4d0ffe5",
+      "kwargs": {
+        "column": "pm10",
+        "max_value": 10000.0,
+        "min_value": 0.0,
+        "mostly": 0.9999
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "0e6acad4-bd2c-470c-aa17-99ede4d1eb6b",
+      "kwargs": {
+        "column": "us_epa_index",
+        "max_value": 6.0,
+        "min_value": 1.0,
+        "mostly": 0.99
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "9d13db05-4471-4737-8ba0-48971934bd9d",
+      "kwargs": {
+        "column": "pm2_5",
+        "mostly": 0.95
+      },
+      "meta": {
+        "severity": "warning"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "4e1771fb-c34c-4651-a5dd-fd75f5cda78f",
+      "kwargs": {
+        "column": "temperature_celsius",
+        "mostly": 0.99
+      },
+      "meta": {
+        "severity": "warning"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "26ae5192-c2e4-4d95-bcd4-3541f081dc40",
+      "kwargs": {
+        "column": "date",
+        "max_value": "2026-09-30T15:08:35.773151",
+        "min_value": "2026-09-25T15:08:35.773151"
+      },
+      "meta": {
+        "severity": "warning"
+      },
+      "severity": "critical",
+      "type": "expect_column_max_to_be_between"
+    }
+  ],
+  "id": "78cac613-79ed-4ce5-ae99-9d5ba371bc85",
+  "meta": {
+    "great_expectations_version": "1.23.2"
+  },
+  "name": "suite_hechos_calidad_aire",
+  "notes": null
+}

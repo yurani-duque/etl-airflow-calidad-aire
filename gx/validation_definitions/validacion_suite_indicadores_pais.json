@@ -1,0 +1,22 @@
+{
+  "data": {
+    "asset": {
+      "id": "7f0abe14-f11f-47a3-9dbd-64c51db7c12a",
+      "name": "suite_indicadores_pais"
+    },
+    "batch_definition": {
+      "id": "78dfcac4-becd-46a6-b39b-127c06888643",
+      "name": "dataset_completo"
+    },
+    "datasource": {
+      "id": "a8bc7e18-56f1-4cf5-b3c6-149ea2d7cc71",
+      "name": "staging"
+    }
+  },
+  "id": "1f735c7f-f4ef-4f79-8e11-a074ca1e76ba",
+  "name": "validacion_suite_indicadores_pais",
+  "suite": {
+    "id": "05de8993-68f5-4352-bff5-22c5dc92b278",
+    "name": "suite_indicadores_pais"
+  }
+}
