@@ -3,10 +3,10 @@ Script Name: quality.py
 Author: Valentina Velasco
 Fecha: 2026-10-04
 Fase ETL: Validacion de calidad
-Descripcion: define y ejecuta con Great Expectations tres suites de validacion (hechos,
-    ubicaciones e indicadores de pais) sobre el dataset enriquecido y registra el
-    resultado de cada expectativa en dw.dq_validation_log.
-Entradas: staging/<run_id>/enriched.parquet y country_indicators.parquet
+Descripcion: define y ejecuta con Great Expectations cuatro suites de validacion (hechos,
+    ubicaciones, indicadores de pais y datos web) y registra el resultado de cada
+    expectativa en dw.dq_validation_log.
+Entradas: staging/<run_id>/enriched.parquet, country_indicators.parquet y web_clean.parquet
 Salidas: resumen de validacion (aprobada, fallos criticos), tabla dw.dq_validation_log y Data Docs en gx/
 Notas: las expectativas criticas bloquean la carga; las de advertencia solo se registran
 """
@@ -75,6 +75,17 @@ def suite_indicadores() -> list:
     ]
 
 
+def suite_web() -> list:
+    return [
+        gxe.ExpectTableRowCountToBeBetween(min_value=150, max_value=260, meta=CRITICA),
+        gxe.ExpectColumnValuesToNotBeNull(column="iso3", meta=CRITICA),
+        gxe.ExpectColumnValuesToBeUnique(column="iso3", meta=CRITICA),
+        gxe.ExpectColumnValuesToMatchRegex(column="iso3", regex=r"^[A-Z]{3}$", meta=CRITICA),
+        gxe.ExpectColumnValuesToBeBetween(column="pm25_annual_web", min_value=0, max_value=100, meta=CRITICA),
+        gxe.ExpectColumnValuesToBeBetween(column="life_years_lost_web", min_value=0, max_value=10, mostly=0.99, meta=ADVERTENCIA),
+    ]
+
+
 def obtener_contexto(efimero: bool = False):
     if efimero:
         return gx.get_context(mode="ephemeral")
@@ -131,14 +142,16 @@ def guardar_log(filas: list[dict]) -> None:
 
 
 def evaluar_suites(contexto, run_id: str, enriquecido: pd.DataFrame, indicadores: pd.DataFrame,
-                   hoy: datetime, min_filas: int = 100_000):
-    """Ejecuta las tres suites y devuelve (resumen, filas_de_log)."""
+                   hoy: datetime, min_filas: int = 100_000, web: pd.DataFrame | None = None):
+    """Ejecuta las suites (cuatro si hay datos web) y devuelve (resumen, filas_de_log)."""
     ubicaciones = enriquecido.drop_duplicates("location_key")
     suites = [
         ("suite_hechos_calidad_aire", suite_hechos(hoy, min_filas), enriquecido),
         ("suite_ubicaciones", suite_ubicaciones(sorted(indicadores["iso3"].unique())), ubicaciones),
         ("suite_indicadores_pais", suite_indicadores(), indicadores.rename(columns={"country_owid": "country"})),
     ]
+    if web is not None:
+        suites.append(("suite_web_pm25", suite_web(), web))
 
     log, suites_resumen = [], {}
     for nombre, expectativas, datos in suites:
@@ -158,9 +171,12 @@ def validar_calidad(run_id: str) -> dict:
     carpeta = Path(staging_dir(run_id))
     enriquecido = pd.read_parquet(carpeta / "enriched.parquet")
     indicadores = pd.read_parquet(carpeta / "country_indicators.parquet")
+    web = pd.read_parquet(carpeta / "web_clean.parquet")
 
     contexto = obtener_contexto()
-    resumen, log = evaluar_suites(contexto, run_id, enriquecido, indicadores, datetime.now(timezone.utc).replace(tzinfo=None))
+    resumen, log = evaluar_suites(
+        contexto, run_id, enriquecido, indicadores, datetime.now(timezone.utc).replace(tzinfo=None), web=web
+    )
     guardar_log(log)
     contexto.build_data_docs()
     return resumen
