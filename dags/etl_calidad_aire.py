@@ -3,10 +3,11 @@ Script Name: etl_calidad_aire.py
 Author: Yurani Duque
 Fecha: 2026-10-05
 Fase ETL: Orquestacion (Extraccion + Transformacion + Validacion + Carga)
-Descripcion: DAG de Airflow que extrae datos de tres fuentes (CSV historico, base de datos
-    de emisiones y API Open-Meteo), los transforma, los une, valida su calidad con
-    Great Expectations y solo si pasan las validaciones los carga al Data Warehouse.
-Entradas: CSV historico, tabla source.owid_co2, API Open-Meteo
+Descripcion: DAG de Airflow que extrae datos de cuatro fuentes (CSV historico, base de datos
+    de emisiones, API Open-Meteo y tabla web de contaminacion por pais), los transforma, los
+    une, valida su calidad con Great Expectations y solo si pasan las validaciones los carga
+    al Data Warehouse.
+Entradas: CSV historico, tabla source.owid_co2, API Open-Meteo, pagina web (scraping)
 Salidas: tablas del esquema dw en PostgreSQL
 Notas: programado diariamente; si la validacion falla, la tarea load_dw no se ejecuta
 """
@@ -63,6 +64,11 @@ def etl_calidad_aire():
         return extraer_api(run_id_actual())
 
     @task
+    def extract_web() -> str:
+        from src.extract_web import extraer_web
+        return extraer_web(run_id_actual())
+
+    @task
     def transform_csv() -> str:
         from src.transform_csv import transformar_csv
         return transformar_csv(run_id_actual())
@@ -76,6 +82,11 @@ def etl_calidad_aire():
     def transform_api() -> str:
         from src.transform_api import transformar_api
         return transformar_api(run_id_actual())
+
+    @task
+    def transform_web() -> str:
+        from src.transform_web import transformar_web
+        return transformar_web(run_id_actual())
 
     @task
     def merge_sources() -> str:
@@ -102,14 +113,15 @@ def etl_calidad_aire():
         registrar_ejecucion(run_id, "success", filas, "validaciones aprobadas y carga completa")
         return filas
 
-    csv_crudo, db_crudo, api_crudo = extract_csv(), extract_db(), extract_api()
-    csv_limpio, owid_limpio, api_limpio = transform_csv(), transform_owid(), transform_api()
+    csv_crudo, db_crudo, api_crudo, web_crudo = extract_csv(), extract_db(), extract_api(), extract_web()
+    csv_limpio, owid_limpio, api_limpio, web_limpio = transform_csv(), transform_owid(), transform_api(), transform_web()
     unido, validado, cargado = merge_sources(), validate_quality(), load_dw()
 
     csv_crudo >> csv_limpio
     db_crudo >> owid_limpio
     api_crudo >> api_limpio
-    [csv_limpio, owid_limpio, api_limpio] >> unido >> validado >> cargado
+    web_crudo >> web_limpio
+    [csv_limpio, owid_limpio, api_limpio, web_limpio] >> unido >> validado >> cargado
 
 
 etl_calidad_aire()
