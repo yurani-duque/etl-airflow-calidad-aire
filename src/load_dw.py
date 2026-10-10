@@ -5,7 +5,7 @@ Fecha: 2026-10-03
 Fase ETL: Carga
 Descripcion: carga el dataset validado en el Data Warehouse (esquema dw): primero las
     dimensiones y despues la tabla de hechos, todo en una sola transaccion.
-Entradas: staging/<run_id>/enriched.parquet, country_indicators.parquet, dwh_version/001_create_dw_schema.sql
+Entradas: staging/<run_id>/enriched.parquet, country_indicators.parquet, web_clean.parquet, dwh_version/001_create_dw_schema.sql
 Salidas: tablas dw.dim_*, dw.fact_air_quality y dw.etl_run_log
 Notas: las dimensiones se actualizan (upsert); los hechos del CSV no se reescriben y los de la API se actualizan
 """
@@ -26,6 +26,7 @@ INDICADORES = ["population", "gdp", "co2_per_capita", "total_ghg", "energy_per_c
 MEDIDAS = [
     "temperature_celsius", "humidity", "wind_kph", "pressure_mb", "precip_mm", "cloud", "uv_index",
     "pm2_5", "pm10", "co", "no2", "so2", "ozone", "us_epa_index", "aqi_us", "pm25_who_ratio", "pm25_exceeds_who",
+    "pm25_vs_national",
 ]
 
 
@@ -70,12 +71,18 @@ def preparar_dim_date(enriquecido: pd.DataFrame) -> pd.DataFrame:
     return fechas[["date_id", "full_date", "year", "quarter", "month", "month_name", "day", "day_of_week", "is_weekend"]]
 
 
-def preparar_dim_indicadores(indicadores: pd.DataFrame) -> pd.DataFrame:
+def preparar_dim_indicadores(indicadores: pd.DataFrame, web: pd.DataFrame | None = None) -> pd.DataFrame:
     df = indicadores.rename(columns={"country_owid": "country"}).copy()
     df["population"] = df["population"].round().astype("Int64")
+    if web is not None:
+        df = df.merge(web[["iso3", "pm25_annual_web", "life_years_lost_web"]], on="iso3", how="left")
+    else:
+        df["pm25_annual_web"] = pd.NA
+        df["life_years_lost_web"] = pd.NA
     columnas = ["iso3", "country"]
     for indicador in INDICADORES:
         columnas += [indicador, f"{indicador}_year"]
+    columnas += ["pm25_annual_web", "life_years_lost_web"]
     return df[columnas]
 
 
@@ -94,12 +101,13 @@ def cargar_dw(run_id: str) -> int:
     carpeta = Path(staging_dir(run_id))
     enriquecido = pd.read_parquet(carpeta / "enriched.parquet")
     indicadores = pd.read_parquet(carpeta / "country_indicators.parquet")
+    web = pd.read_parquet(carpeta / "web_clean.parquet")
 
     with get_engine().begin() as conn:
         ejecutar_ddl(conn)
         upsert(conn, preparar_dim_location(enriquecido), schema, "dim_location", ["location_key"], True)
         upsert(conn, preparar_dim_date(enriquecido), schema, "dim_date", ["date_id"], False)
-        upsert(conn, preparar_dim_indicadores(indicadores), schema, "dim_country_indicator", ["iso3"], True)
+        upsert(conn, preparar_dim_indicadores(indicadores, web), schema, "dim_country_indicator", ["iso3"], True)
 
         ids_ubicacion = dict(conn.execute(text(f"select location_key, location_id from {schema}.dim_location")).all())
         ids_pais = dict(conn.execute(text(f"select iso3, country_indicator_id from {schema}.dim_country_indicator")).all())
@@ -108,6 +116,13 @@ def cargar_dw(run_id: str) -> int:
         clave = ["location_id", "date_id", "source_id"]
         upsert(conn, hechos[hechos["source_id"] == SOURCE_IDS["kaggle_csv"]], schema, "fact_air_quality", clave, False)
         upsert(conn, hechos[hechos["source_id"] == SOURCE_IDS["open_meteo_api"]], schema, "fact_air_quality", clave, True)
+
+        # completa la medida derivada en hechos que ya estaban cargados antes de existir la fuente web
+        conn.execute(text(
+            f"update {schema}.fact_air_quality f set pm25_vs_national = f.pm2_5 - c.pm25_annual_web "
+            f"from {schema}.dim_country_indicator c where f.country_indicator_id = c.country_indicator_id "
+            "and f.pm25_vs_national is null and f.pm2_5 is not null and c.pm25_annual_web is not null"
+        ))
 
     logger.info(f"carga completa en {schema}: {len(hechos)} filas de hechos procesadas")
     return len(hechos)
