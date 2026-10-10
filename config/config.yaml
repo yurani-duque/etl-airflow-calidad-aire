@@ -23,5 +23,10 @@ api:
   max_retries: 4
   min_hours_per_day: 18
 
+web:
+  url: https://en.wikipedia.org/wiki/List_of_countries_by_air_pollution
+  user_agent: "etl-calidad-aire/1.0 (proyecto academico UAO)"
+  timeout_seconds: 30
+
 quality:
   who_pm25_24h: 15

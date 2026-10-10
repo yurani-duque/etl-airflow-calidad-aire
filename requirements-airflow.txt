@@ -6,3 +6,5 @@ python-dotenv
 psycopg2-binary
 great-expectations==1.23.2
 pytest
+beautifulsoup4
+lxml
