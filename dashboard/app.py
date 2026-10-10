@@ -4,8 +4,9 @@ Author: Valentina Velasco
 Fecha: 2026-10-08
 Fase ETL: Visualizacion
 Descripcion: dashboard de Streamlit sobre el Data Warehouse validado. Responde que ciudades
-    superan la guia de la OMS para PM2.5, como se relaciona el aire con las emisiones y el
-    ingreso de cada pais, como evoluciona en el tiempo y en que estado esta la calidad de los datos.
+    superan la guia de la OMS para PM2.5, como se comparan con el promedio nacional, como se
+    relaciona el aire con las emisiones y el ingreso de cada pais, como evoluciona en el tiempo
+    y en que estado esta la calidad de los datos.
 Entradas: tablas del esquema dw (solo datos ya validados y cargados por el DAG)
 Salidas: aplicacion web en el puerto 8501
 Notas: ejecutar con "docker compose up -d dashboard" o "uv run streamlit run dashboard/app.py"
@@ -103,6 +104,29 @@ with tab_ciudades:
 
     sobre_oms = int((ciudades["pct_excede"] > 50).sum())
     st.info(f"{sobre_oms} de {len(ciudades)} ciudades superan la guía diaria de la OMS en más de la mitad de los días del periodo seleccionado.")
+
+    st.subheader("Ciudad frente al promedio nacional")
+    nacional = consulta(f"""
+        select l.location_name, l.country, avg(f.pm2_5) as pm25_ciudad, max(c.pm25_annual_web) as pm25_nacional,
+               max(c.life_years_lost_web) as anios_perdidos
+        from {SCHEMA}.fact_air_quality f join {SCHEMA}.dim_location l using (location_id)
+             join {SCHEMA}.dim_country_indicator c using (country_indicator_id)
+             join {SCHEMA}.dim_date d using (date_id)
+        where {FILTRO} and f.pm2_5 is not null and c.pm25_annual_web is not null
+        group by 1, 2 having count(*) >= 30
+    """, **PARAMS)
+    if nacional.empty:
+        st.warning("Aún no hay datos del promedio nacional (fuente web).")
+    else:
+        fig = px.scatter(nacional, x="pm25_nacional", y="pm25_ciudad", hover_name="location_name", color="anios_perdidos",
+                         color_continuous_scale="YlOrRd",
+                         labels={"pm25_nacional": "PM2.5 anual del país, fuente web (µg/m³)",
+                                 "pm25_ciudad": "PM2.5 promedio de la ciudad (µg/m³)", "anios_perdidos": "años de vida perdidos"})
+        tope = float(max(nacional["pm25_nacional"].max(), nacional["pm25_ciudad"].max()))
+        fig.add_scatter(x=[0, tope], y=[0, tope], mode="lines", name="ciudad = país", line=dict(dash="dash"))
+        st.plotly_chart(fig, width="stretch")
+        encima = int((nacional["pm25_ciudad"] > nacional["pm25_nacional"]).sum())
+        st.info(f"{encima} de {len(nacional)} ciudades tienen un PM2.5 promedio mayor que el promedio anual de su país.")
 
 with tab_emisiones:
     paises = consulta(f"""
