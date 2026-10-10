@@ -4,7 +4,7 @@ Author: Yurani Duque
 Fecha: 2026-10-06
 Fase ETL: Pruebas
 Descripcion: verifica que el DAG de Airflow carga sin errores y que el orden de las tareas
-    respeta la logica del pipeline (tres extracciones, union, validacion y carga).
+    respeta la logica del pipeline (cuatro extracciones, union, validacion y carga).
 Entradas: dags/etl_calidad_aire.py
 Salidas: resultado de pytest
 Notas: requiere Airflow, se ejecuta dentro del contenedor
@@ -28,13 +28,14 @@ def dag():
     return bolsa.dags["etl_calidad_aire"]
 
 
-def test_hay_tres_tareas_de_extraccion_independientes(dag):
-    for tarea in ["extract_csv", "extract_db", "extract_api"]:
+def test_hay_cuatro_tareas_de_extraccion_independientes(dag):
+    for tarea in ["extract_csv", "extract_db", "extract_api", "extract_web"]:
         assert dag.get_task(tarea).upstream_task_ids == set()
 
 
-def test_la_union_espera_las_tres_transformaciones(dag):
-    assert dag.get_task("merge_sources").upstream_task_ids == {"transform_csv", "transform_owid", "transform_api"}
+def test_la_union_espera_las_cuatro_transformaciones(dag):
+    esperadas = {"transform_csv", "transform_owid", "transform_api", "transform_web"}
+    assert dag.get_task("merge_sources").upstream_task_ids == esperadas
 
 
 def test_la_carga_solo_ocurre_despues_de_validar(dag):
@@ -44,3 +45,4 @@ def test_la_carga_solo_ocurre_despues_de_validar(dag):
 
 def test_programacion_diaria(dag):
     assert dag.schedule == "@daily"
+
