@@ -1,5 +1,6 @@
 -- Data Warehouse: esquema estrella en el esquema dw
 -- fuentes: World Weather Repository (CSV), Our World in Data (base de datos fuente), Open-Meteo (API)
+-- y tabla web de contaminacion por pais (web scraping), que enriquece dim_country_indicator
 -- todas las sentencias son idempotentes, se pueden ejecutar en cada corrida
 
 create schema if not exists dw;
@@ -52,8 +53,14 @@ create table if not exists dw.dim_country_indicator (
     total_ghg numeric(14,3),
     total_ghg_year smallint,
     energy_per_capita numeric(14,3),
-    energy_per_capita_year smallint
+    energy_per_capita_year smallint,
+    pm25_annual_web numeric(8,2),
+    life_years_lost_web numeric(5,2)
 );
+
+-- columnas agregadas con la fuente web; permiten actualizar un almacen creado antes
+alter table dw.dim_country_indicator add column if not exists pm25_annual_web numeric(8,2);
+alter table dw.dim_country_indicator add column if not exists life_years_lost_web numeric(5,2);
 
 create table if not exists dw.fact_air_quality (
     fact_id bigserial primary key,
@@ -78,9 +85,12 @@ create table if not exists dw.fact_air_quality (
     aqi_us numeric(6,1),
     pm25_who_ratio numeric(8,3),
     pm25_exceeds_who boolean,
+    pm25_vs_national numeric(8,3),
     loaded_at timestamptz not null default now(),
     unique (location_id, date_id, source_id)
 );
+
+alter table dw.fact_air_quality add column if not exists pm25_vs_national numeric(8,3);
 
 create index if not exists idx_fact_aq_location on dw.fact_air_quality (location_id);
 create index if not exists idx_fact_aq_date on dw.fact_air_quality (date_id);
