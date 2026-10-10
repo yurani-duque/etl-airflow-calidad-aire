@@ -1,0 +1,83 @@
+{
+  "expectations": [
+    {
+      "id": "73a79cc6-c659-49e0-9fca-8d11c506c265",
+      "kwargs": {
+        "max_value": 260,
+        "min_value": 150
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_table_row_count_to_be_between"
+    },
+    {
+      "id": "b54568f4-0ff6-4488-bd06-152f55c58609",
+      "kwargs": {
+        "column": "iso3"
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_not_be_null"
+    },
+    {
+      "id": "16886603-349c-43b6-9ece-0436ae16edc8",
+      "kwargs": {
+        "column": "iso3"
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_unique"
+    },
+    {
+      "id": "b634710c-23d0-4793-8c60-a52b59177997",
+      "kwargs": {
+        "column": "iso3",
+        "regex": "^[A-Z]{3}$"
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_match_regex"
+    },
+    {
+      "id": "860ed7f4-01fc-4f71-94c9-0ba325ae1549",
+      "kwargs": {
+        "column": "pm25_annual_web",
+        "max_value": 100.0,
+        "min_value": 0.0
+      },
+      "meta": {
+        "severity": "critical"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    },
+    {
+      "id": "e95ea50b-d27a-4dbc-b7ba-73b4d51f35f4",
+      "kwargs": {
+        "column": "life_years_lost_web",
+        "max_value": 10.0,
+        "min_value": 0.0,
+        "mostly": 0.99
+      },
+      "meta": {
+        "severity": "warning"
+      },
+      "severity": "critical",
+      "type": "expect_column_values_to_be_between"
+    }
+  ],
+  "id": "2cd046b8-c76d-4d5a-9030-08d9fca546cb",
+  "meta": {
+    "great_expectations_version": "1.23.2"
+  },
+  "name": "suite_web_pm25",
+  "notes": null
+}
