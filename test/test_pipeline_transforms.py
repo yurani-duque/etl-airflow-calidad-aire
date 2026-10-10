@@ -11,12 +11,16 @@ Notas: correr con "uv run pytest test/"
 
 import pandas as pd
 
+import pytest
+
 from src.extract_api import calcular_dias_pasados
+from src.extract_web import parsear_tabla
 from src.locations import cargar_mapa_paises
 from src.merge import unir_fuentes
 from src.transform_api import agregar_aire_diario, aqi_a_indice_epa
 from src.transform_csv import COLUMNAS_FINALES, limpiar_csv
 from src.transform_owid import ultimo_valor_por_pais
+from src.transform_web import limpiar_web
 
 
 def _fila_csv(**cambios):
@@ -105,3 +109,46 @@ def test_union_no_duplica_dias_que_ya_estan_en_el_csv():
     assert len(unido) == 2
     assert unido["pm25_exceeds_who"].tolist() == [True, False]
     assert "ind_population" in unido.columns
+
+
+HTML_WEB = """
+<html><body>
+<table class="wikitable"><tr><th>Otra</th><th>Tabla</th></tr><tr><td>1</td><td>2</td></tr></table>
+<table class="wikitable">
+<tr><th>Rank</th><th>Country</th><th>Particulate matter ( PM2.5 ) (in μg/m 3 ) WHO-Guideline=5</th>
+<th>Loss of life expectancy (years)</th></tr>
+<tr><td>1</td><td>Bangladesh</td><td>54.17</td><td>\u22124.82</td></tr>
+<tr><td>2</td><td>Ivory Coast[12]</td><td>10.45</td><td>\u22120.53</td></tr>
+<tr><td>3</td><td>Northern Cyprus</td><td>14.51</td><td>\u22120.93</td></tr>
+</table></body></html>
+"""
+
+
+def test_web_localiza_la_tabla_de_paises_por_su_encabezado():
+    tabla = parsear_tabla(HTML_WEB)
+    assert tabla["country"].tolist() == ["Bangladesh", "Ivory Coast[12]", "Northern Cyprus"]
+
+
+def test_web_falla_si_la_estructura_de_la_pagina_cambia():
+    with pytest.raises(ValueError):
+        parsear_tabla("<html><body><table class='wikitable'><tr><th>x</th></tr></table></body></html>")
+
+
+def test_web_limpia_notas_signos_y_asigna_iso3():
+    limpio = limpiar_web(parsear_tabla(HTML_WEB), cargar_mapa_paises())
+    assert limpio["iso3"].tolist() == ["BGD", "CIV"]
+    assert limpio.loc[0, "pm25_annual_web"] == 54.17
+    assert limpio.loc[0, "life_years_lost_web"] == 4.82
+    assert limpio.loc[1, "country_web"] == "Ivory Coast"
+
+
+def test_union_calcula_la_diferencia_con_el_promedio_nacional():
+    base = {"iso3": "COL", "location_key": "COL|bogota", "source": "kaggle_csv", "date": pd.Timestamp("2026-09-08")}
+    csv = pd.DataFrame([{**base, "pm2_5": 20.0}])
+    api = pd.DataFrame([{**base, "source": "open_meteo_api", "date": pd.Timestamp("2026-09-09"), "pm2_5": 8.0}])
+    indicadores = pd.DataFrame({"iso3": ["COL"], **{
+        c: [1] for c in ["population", "population_year", "gdp", "gdp_year", "co2_per_capita", "co2_per_capita_year",
+                         "total_ghg", "total_ghg_year", "energy_per_capita", "energy_per_capita_year"]}})
+    web = pd.DataFrame({"iso3": ["COL"], "pm25_annual_web": [12.0], "life_years_lost_web": [0.7]})
+    unido = unir_fuentes(csv, api, indicadores, umbral_pm25=15, web=web)
+    assert unido["pm25_vs_national"].tolist() == [8.0, -4.0]

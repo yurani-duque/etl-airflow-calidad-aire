@@ -68,3 +68,32 @@ def test_filas_repetidas_bloquean_la_carga():
     datos = _dataset()
     resumen = _evaluar(pd.concat([datos, datos.head(5)], ignore_index=True))
     assert resumen["aprobada"] is False
+
+
+def _web(n=200):
+    return pd.DataFrame({
+        "iso3": [f"B{chr(65 + i // 26)}{chr(65 + i % 26)}" for i in range(n)],
+        "pm25_annual_web": 12.0, "life_years_lost_web": 0.5,
+    })
+
+
+def _evaluar_con_web(web):
+    contexto = obtener_contexto(efimero=True)
+    indicadores = _indicadores()
+    datos = _dataset().assign(iso3=indicadores["iso3"].iloc[0])
+    return evaluar_suites(contexto, "test", datos, indicadores, HOY, min_filas=10, web=web)[0]
+
+
+def test_datos_web_validos_pasan():
+    resumen = _evaluar_con_web(_web())
+    assert resumen["suites"]["suite_web_pm25"]["aprobada"] is True
+
+
+def test_pm25_web_fuera_de_rango_bloquea_la_carga():
+    web = _web()
+    web.loc[0, "pm25_annual_web"] = 540.0
+    assert _evaluar_con_web(web)["aprobada"] is False
+
+
+def test_pocas_filas_en_la_web_bloquean_la_carga():
+    assert _evaluar_con_web(_web(n=20))["aprobada"] is False
