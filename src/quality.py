@@ -19,6 +19,7 @@ import great_expectations.expectations as gxe
 import pandas as pd
 from sqlalchemy import text
 
+from src.quarantine import RANGOS
 from utils.config_loader import ROOT, load_config, staging_dir
 from utils.db_connector import get_engine
 from utils.logger import get_logger
@@ -27,6 +28,10 @@ logger = get_logger("quality")
 
 CRITICA = {"severity": "critical"}
 ADVERTENCIA = {"severity": "warning"}
+
+def _rango(columna: str, **extra):
+    minimo, maximo = RANGOS[columna]
+    return gxe.ExpectColumnValuesToBeBetween(column=columna, min_value=minimo, max_value=maximo, meta=CRITICA, **extra)
 
 
 def suite_hechos(hoy: datetime, min_filas: int = 100_000) -> list:
@@ -37,14 +42,14 @@ def suite_hechos(hoy: datetime, min_filas: int = 100_000) -> list:
         gxe.ExpectColumnValuesToNotBeNull(column="date", meta=CRITICA),
         gxe.ExpectColumnValuesToBeInSet(column="source", value_set=["kaggle_csv", "open_meteo_api"], meta=CRITICA),
         gxe.ExpectCompoundColumnsToBeUnique(column_list=["location_key", "date", "source"], meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="humidity", min_value=0, max_value=100, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="cloud", min_value=0, max_value=100, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="temperature_celsius", min_value=-90, max_value=60, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="wind_kph", min_value=0, max_value=500, mostly=0.999, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="pressure_mb", min_value=400, max_value=1100, mostly=0.999, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="pm2_5", min_value=0, max_value=1000, mostly=0.999, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="pm10", min_value=0, max_value=10_000, mostly=0.9999, meta=CRITICA),
-        gxe.ExpectColumnValuesToBeBetween(column="us_epa_index", min_value=1, max_value=6, mostly=0.99, meta=CRITICA),
+        _rango("humidity"),
+        _rango("cloud"),
+        _rango("temperature_celsius"),
+        _rango("wind_kph", mostly=0.999),
+        _rango("pressure_mb", mostly=0.999),
+        _rango("pm2_5", mostly=0.999),
+        _rango("pm10", mostly=0.9999),
+        _rango("us_epa_index", mostly=0.99),
         gxe.ExpectColumnValuesToNotBeNull(column="pm2_5", mostly=0.95, meta=ADVERTENCIA),
         gxe.ExpectColumnValuesToNotBeNull(column="temperature_celsius", mostly=0.99, meta=ADVERTENCIA),
         gxe.ExpectColumnMaxToBeBetween(
