@@ -110,6 +110,15 @@ create table if not exists dw.dq_validation_log (
     observed_value text
 );
 
+create table if not exists dw.quarantine_log (
+    run_id varchar(200) primary key,
+    created_at timestamptz not null default now(),
+    batch_rows integer not null,
+    quarantined_rows integer not null,
+    failed_rules text,
+    path text
+);
+
 create table if not exists dw.etl_run_log (
     run_id varchar(200) primary key,
     finished_at timestamptz not null default now(),
