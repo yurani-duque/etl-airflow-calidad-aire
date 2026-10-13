@@ -5,17 +5,16 @@ Fecha: 2026-10-05
 Fase ETL: Orquestacion (Extraccion + Transformacion + Validacion + Carga)
 Descripcion: DAG de Airflow que extrae datos de cuatro fuentes (CSV historico, base de datos
     de emisiones, API Open-Meteo y tabla web de contaminacion por pais), los transforma, los
-    une, valida su calidad con Great Expectations y solo si pasan las validaciones los carga
-    al Data Warehouse.
+    une y valida su calidad con Great Expectations. Si la calidad es buena, el lote se carga
+    al Data Warehouse; si es mala, el lote va a cuarentena y se emite una alerta.
 Entradas: CSV historico, tabla source.owid_co2, API Open-Meteo, pagina web (scraping)
-Salidas: tablas del esquema dw en PostgreSQL
-Notas: programado diariamente; si la validacion falla, la tarea load_dw no se ejecuta
+Salidas: tablas del esquema dw en PostgreSQL y, si hay datos invalidos, data/quarantine/<run_id>
+Notas: programado diariamente; validate_quality decide la ruta: load_dw o quarantine_data
 """
 
 from datetime import datetime, timedelta
 
 from airflow.sdk import Param, dag, get_current_context, task
-from airflow.sdk.exceptions import AirflowFailException
 
 ARGS = {"owner": "equipo-etl", "retries": 2, "retry_delay": timedelta(minutes=2)}
 
@@ -95,14 +94,18 @@ def etl_calidad_aire():
         contexto = get_current_context()
         return unir(contexto["run_id"], bool(contexto["params"].get("prueba_falla_calidad")))
 
-    @task
-    def validate_quality() -> dict:
+    @task.branch
+    def validate_quality() -> str:
+        """Si la calidad es buena sigue a la carga; si es mala, el lote va a cuarentena."""
         from src.quality import validar_calidad
 
         resumen = validar_calidad(run_id_actual())
-        if not resumen["aprobada"]:
-            raise AirflowFailException(f"validacion fallida, fallos criticos: {resumen['fallos_criticos']}")
-        return resumen
+        return "load_dw" if resumen["aprobada"] else "quarantine_data"
+
+    @task
+    def quarantine_data() -> dict:
+        from src.quarantine import poner_en_cuarentena
+        return poner_en_cuarentena(run_id_actual())
 
     @task
     def load_dw() -> int:
@@ -115,13 +118,13 @@ def etl_calidad_aire():
 
     csv_crudo, db_crudo, api_crudo, web_crudo = extract_csv(), extract_db(), extract_api(), extract_web()
     csv_limpio, owid_limpio, api_limpio, web_limpio = transform_csv(), transform_owid(), transform_api(), transform_web()
-    unido, validado, cargado = merge_sources(), validate_quality(), load_dw()
+    unido, validado, cargado, cuarentena = merge_sources(), validate_quality(), load_dw(), quarantine_data()
 
     csv_crudo >> csv_limpio
     db_crudo >> owid_limpio
     api_crudo >> api_limpio
     web_crudo >> web_limpio
-    [csv_limpio, owid_limpio, api_limpio, web_limpio] >> unido >> validado >> cargado
+    [csv_limpio, owid_limpio, api_limpio, web_limpio] >> unido >> validado >> [cargado, cuarentena]
 
 
 etl_calidad_aire()
