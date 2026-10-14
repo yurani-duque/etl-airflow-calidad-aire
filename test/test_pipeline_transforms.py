@@ -17,6 +17,7 @@ from src.extract_api import calcular_dias_pasados
 from src.extract_web import parsear_tabla
 from src.locations import cargar_mapa_paises
 from src.merge import unir_fuentes
+from src.quarantine import filas_invalidas
 from src.transform_api import agregar_aire_diario, aqi_a_indice_epa
 from src.transform_csv import COLUMNAS_FINALES, limpiar_csv
 from src.transform_owid import ultimo_valor_por_pais
@@ -152,3 +153,24 @@ def test_union_calcula_la_diferencia_con_el_promedio_nacional():
     web = pd.DataFrame({"iso3": ["COL"], "pm25_annual_web": [12.0], "life_years_lost_web": [0.7]})
     unido = unir_fuentes(csv, api, indicadores, umbral_pm25=15, web=web)
     assert unido["pm25_vs_national"].tolist() == [8.0, -4.0]
+
+
+def test_cuarentena_identifica_filas_invalidas_con_su_motivo():
+    base = {"location_key": "COL|bogota", "iso3": "COL", "source": "kaggle_csv", "humidity": 70.0, "pm2_5": 12.0}
+    df = pd.DataFrame([
+        {**base, "date": pd.Timestamp("2026-01-01")},
+        {**base, "date": pd.Timestamp("2026-01-02"), "humidity": 150.0},
+        {**base, "date": pd.Timestamp("2026-01-03"), "pm2_5": -4.0},
+        {**base, "date": pd.Timestamp("2026-01-01")},
+    ])
+    malas = filas_invalidas(df)
+    assert malas.index.tolist() == [1, 2, 3]
+    assert "humidity fuera de rango" in malas.loc[1, "motivo"]
+    assert "pm2_5 fuera de rango" in malas.loc[2, "motivo"]
+    assert "repetida" in malas.loc[3, "motivo"]
+
+
+def test_cuarentena_no_marca_filas_validas():
+    df = pd.DataFrame([{"location_key": "COL|bogota", "iso3": "COL", "source": "kaggle_csv",
+                        "date": pd.Timestamp("2026-01-01"), "humidity": 70.0, "pm2_5": 12.0}])
+    assert filas_invalidas(df).empty

@@ -4,7 +4,7 @@ Author: Yurani Duque
 Fecha: 2026-10-06
 Fase ETL: Pruebas
 Descripcion: verifica que el DAG de Airflow carga sin errores y que el orden de las tareas
-    respeta la logica del pipeline (cuatro extracciones, union, validacion y carga).
+    respeta la logica del pipeline (cuatro extracciones, union, validacion y carga o cuarentena).
 Entradas: dags/etl_calidad_aire.py
 Salidas: resultado de pytest
 Notas: requiere Airflow, se ejecuta dentro del contenedor
@@ -43,6 +43,12 @@ def test_la_carga_solo_ocurre_despues_de_validar(dag):
     assert dag.get_task("load_dw").upstream_task_ids == {"validate_quality"}
 
 
+def test_la_calidad_mala_envia_el_lote_a_cuarentena(dag):
+    assert dag.get_task("validate_quality").downstream_task_ids == {"load_dw", "quarantine_data"}
+    assert dag.get_task("quarantine_data").upstream_task_ids == {"validate_quality"}
+
+
 def test_programacion_diaria(dag):
     assert dag.schedule == "@daily"
+
 
