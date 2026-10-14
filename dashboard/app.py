@@ -184,7 +184,8 @@ with tab_calidad:
         st.warning("Aún no hay ejecuciones registradas.")
     else:
         estado = ultimo_run.loc[0, "status"]
-        (st.success if estado == "success" else st.error)(f"Última ejecución del DAG: {ultimo_run.loc[0, 'run_id']} ({estado})")
+        aviso = st.success if estado == "success" else st.warning if estado == "quarantined" else st.error
+        aviso(f"Última ejecución del DAG: {ultimo_run.loc[0, 'run_id']} ({estado})")
 
     resumen = consulta(f"""
         select suite_name as suite, severity as severidad, count(*) as expectativas,
@@ -195,6 +196,16 @@ with tab_calidad:
     """)
     st.subheader("Última validación aprobada (Great Expectations)")
     st.dataframe(resumen, width="stretch", hide_index=True)
+
+    try:
+        cuarentena = consulta(f"select run_id, created_at, batch_rows, quarantined_rows, failed_rules from {SCHEMA}.quarantine_log order by created_at desc limit 10")
+    except Exception:
+        cuarentena = pd.DataFrame()
+    st.subheader("Lotes en cuarentena")
+    if cuarentena.empty:
+        st.caption("Ningún lote ha sido enviado a cuarentena.")
+    else:
+        st.dataframe(cuarentena, width="stretch", hide_index=True)
 
     historial = consulta(f"select run_id, status, fact_rows_loaded, finished_at, detail from {SCHEMA}.etl_run_log order by finished_at desc limit 15")
     st.subheader("Historial de ejecuciones")
