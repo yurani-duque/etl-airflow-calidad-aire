@@ -1,6 +1,6 @@
 # ETL de clima, calidad del aire y emisiones con Airflow
 
-Pipeline ETL orquestado con Apache Airflow que integra cuatro fuentes (un CSV histórico, una base de datos, una API pública y una tabla web extraída con scraping), valida su calidad con Great Expectations y solo entonces carga un Data Warehouse en PostgreSQL con modelo estrella. Un dashboard en Streamlit consulta únicamente los datos ya validados. El proyecto está alineado con el ODS 11 (calidad del aire urbano) y el ODS 13 (acción por el clima).
+Pipeline ETL orquestado con Apache Airflow que integra cuatro fuentes (un CSV histórico, una base de datos, una API pública y una tabla web extraída con scraping), valida su calidad con Great Expectations, carga un Data Warehouse en PostgreSQL con modelo estrella solo los lotes que la superan y envía a cuarentena los que no. Un dashboard en Streamlit consulta únicamente los datos ya validados. El proyecto está alineado con el ODS 11 (calidad del aire urbano) y el ODS 13 (acción por el clima).
 
 Curso ETL (G51), Ingeniería de Datos e Inteligencia Artificial, Universidad Autónoma de Occidente. Autoras: Yurani Duque y Valentina Velasco.
 
@@ -31,7 +31,7 @@ El proyecto anterior solo respondía qué ciudades tienen peor aire a partir de 
 1. Monitorear de forma continua la calidad del aire de 260 ciudades capitales frente a la guía de la OMS para PM2.5 (15 µg/m³ en 24 horas), extendiendo el histórico del CSV con datos diarios de una API.
 2. Relacionar el aire de cada ciudad con las emisiones de CO₂, el PIB y la energía per cápita de su país, para ver si el nivel de emisiones o de ingreso se asocia con la contaminación.
 3. Contrastar la medición de cada ciudad con el promedio anual de PM2.5 de su país y con los años de vida perdidos por la contaminación, publicados en una tabla web.
-4. Garantizar que solo se cargan datos válidos: cada ejecución se valida y, si falla una regla crítica, la carga se bloquea y queda registrada.
+4. Garantizar que solo se cargan datos válidos: cada ejecución se valida y, si falla una regla crítica, el lote va a cuarentena, se emite una alerta y la carga no se ejecuta.
 
 Preguntas que guían el modelo: ¿qué ciudades superan la guía de la OMS y con qué frecuencia?, ¿se relaciona la contaminación con las emisiones y el ingreso del país?, ¿cómo evoluciona el PM2.5 y qué tan frescos están los datos?, ¿en qué estado está la calidad del dato?
 
@@ -100,7 +100,8 @@ El análisis está en [`notebooks/eda_fuentes.ipynb`](notebooks/eda_fuentes.ipyn
 | Transform API | `src/transform_api.py` | horas a promedio diario, EPA desde AQI, solo días completos |
 | Transform Web | `src/transform_web.py` | quita notas al pie, convierte a numérico y asigna ISO3 a cada país |
 | Merge | `src/merge.py` | dataset enriquecido: lecturas de CSV y API más indicadores del país, PM2.5 nacional de la web y la diferencia de cada lectura con ese promedio |
-| Validación | `src/quality.py` | cuatro suites de Great Expectations y registro de resultados |
+| Validación | `src/quality.py` | cuatro suites de Great Expectations y registro de resultados; decide la ruta del lote |
+| Cuarentena | `src/quarantine.py` | si la validación falla: guarda las filas inválidas con su motivo, registra el lote en `dw.quarantine_log` y emite una alerta |
 | Load | `src/load_dw.py` | dimensiones y luego hechos, en una transacción con carga masiva (`COPY`) |
 
 **Estrategia de carga.** Las dimensiones se actualizan con upsert. Los hechos del CSV usan `ON CONFLICT DO NOTHING` (son históricos) y los de la API `DO UPDATE` (se refrescan los últimos días). La clave de un hecho es `(location_id, date_id, source_id)`, por lo que reejecutar el pipeline no duplica datos.
@@ -121,13 +122,14 @@ DAG `etl_calidad_aire`, programado `@daily`, con `catchup=False` y una sola ejec
 
 ![Grafo del DAG](docs/img/airflow_dag_bloqueado.jpg)
 
-- **Cuatro extracciones independientes** (`extract_csv`, `extract_db`, `extract_api`, `extract_web`) que corren en paralelo, cada una con su transformación (11 tareas en total).
+- **Cuatro extracciones independientes** (`extract_csv`, `extract_db`, `extract_api`, `extract_web`) que corren en paralelo, cada una con su transformación (12 tareas en total).
 - `merge_sources` espera las cuatro transformaciones.
-- `validate_quality` ejecuta Great Expectations. Si falla una expectativa crítica lanza `AirflowFailException` (sin reintentos) y **`load_dw` no se ejecuta** (`upstream_failed`). En la imagen, un run con datos inválidos inyectados.
+- `validate_quality` ejecuta Great Expectations y **decide la ruta** (es una tarea de ramificación): si la calidad es buena sigue a `load_dw`; si falla una regla crítica el flujo continúa por `quarantine_data` y `load_dw` queda omitido (`skipped`). En la imagen, un run con datos inválidos inyectados: el lote termina en cuarentena.
+- `quarantine_data` identifica las filas inválidas del lote con su motivo, las guarda en `data/quarantine/<run_id>/`, registra el lote en `dw.quarantine_log`, deja la ejecución con estado `quarantined` en `dw.etl_run_log` y emite una alerta en el log de la tarea. El Data Warehouse no cambia.
 - `load_dw` carga el Data Warehouse y registra la ejecución.
 - Reintentos: 2 por tarea con 2 minutos de espera. Un fallo que no es temporal, como un archivo CSV dañado, agota los reintentos, falla la tarea y requiere intervención. Un `on_failure_callback` registra cualquier fallo en `dw.etl_run_log`.
 - Los datos pasan entre tareas como archivos parquet en `data/staging/<run_id>/`, no por XCom.
-- Parámetro `prueba_falla_calidad` (falso por defecto): al activarlo, `merge_sources` agrega filas inválidas para demostrar el bloqueo de la carga.
+- Parámetro `prueba_falla_calidad` (falso por defecto): al activarlo, `merge_sources` agrega filas inválidas para demostrar la cuarentena del lote.
 
 Una ejecución exitosa:
 
@@ -135,7 +137,7 @@ Una ejecución exitosa:
 
 ## 7. Validación con Great Expectations
 
-Las suites se definen en `src/quality.py` y se versionan como JSON en `gx/expectations/`. Cada expectativa es **crítica** (bloquea la carga) o **advertencia** (solo se registra). El resultado de cada expectativa se guarda en `dw.dq_validation_log` y se generan Data Docs en `gx/uncommitted/data_docs/`.
+Las suites se definen en `src/quality.py` y se versionan como JSON en `gx/expectations/`. Cada expectativa es **crítica** (envía el lote a cuarentena y bloquea la carga) o **advertencia** (solo se registra). El resultado de cada expectativa se guarda en `dw.dq_validation_log` y se generan Data Docs en `gx/uncommitted/data_docs/`.
 
 | Suite | Datos | Críticas | Advertencias | Reglas principales |
 |---|---|---|---|---|
@@ -146,7 +148,7 @@ Las suites se definen en `src/quality.py` y se versionan como JSON en `gx/expect
 
 ![Validación fallida](docs/img/gx_validacion_fallida.jpg)
 
-La imagen muestra la validación de un run con datos inválidos: 15 de 17 expectativas cumplidas y dos críticas fallidas (humedad fuera de rango y filas repetidas), suficiente para bloquear la carga.
+La imagen muestra la validación de un run con datos inválidos: 15 de 17 expectativas cumplidas y dos críticas fallidas (humedad fuera de rango y filas repetidas), suficiente para enviar el lote a cuarentena.
 
 ## 8. Modelo de datos
 
@@ -156,7 +158,7 @@ Esquema estrella en el esquema `dw` (DDL en [`dwh_version/001_create_dw_schema.s
 
 - **Hechos** `fact_air_quality`: una fila por ciudad, día y fuente, con clima, contaminantes, índice EPA, razón contra la guía OMS y bandera `pm25_exceeds_who`, más `pm25_vs_national` (lectura menos el PM2.5 anual del país).
 - **Dimensiones**: `dim_location`, `dim_date`, `dim_source` y `dim_country_indicator` (una fila por país, con los indicadores de OWID y el PM2.5 anual y los años de vida perdidos de la web).
-- **Auditoría**: `dq_validation_log` (resultados de validación) y `etl_run_log` (estado de cada ejecución).
+- **Auditoría**: `dq_validation_log` (resultados de validación), `quarantine_log` (lotes enviados a cuarentena) y `etl_run_log` (estado de cada ejecución: `success`, `quarantined` o `failed`).
 
 ## 9. Visualizaciones e insights
 
@@ -175,7 +177,7 @@ Con los datos cargados al 2026-10-10 (171,788 registros ciudad-día):
 
 ![Evolución](docs/img/dashboard_evolucion.jpg)
 
-La pestaña **Calidad de los datos** muestra el estado de la última ejecución, el resumen de la última validación aprobada y el historial, incluida la ejecución bloqueada de la demostración:
+La pestaña **Calidad de los datos** muestra el estado de la última ejecución, el resumen de la última validación aprobada y el historial, incluida la ejecución enviada a cuarentena en la demostración y la tabla de lotes en cuarentena:
 
 ![Calidad de los datos](docs/img/dashboard_calidad_datos.jpg)
 
@@ -210,9 +212,9 @@ Verificar la carga desde la terminal:
 docker compose exec warehouse psql -U dwh -d dwh -c "select count(*) from dw.fact_air_quality"
 ```
 
-### Demostrar el bloqueo por calidad
+### Demostrar la cuarentena por calidad
 
-En Airflow, **Trigger DAG w/ config** y activar `prueba_falla_calidad` (o ejecutar el comando de abajo). La tarea `validate_quality` falla, `load_dw` queda como `upstream_failed` y el Data Warehouse no cambia.
+En Airflow, **Trigger DAG w/ config** y activar `prueba_falla_calidad` (o ejecutar el comando de abajo). La tarea `validate_quality` detecta las reglas críticas fallidas y envía el lote a `quarantine_data`; `load_dw` queda omitido y el Data Warehouse no cambia. Para revisar el resultado: la pestaña **Calidad de los datos** del dashboard muestra el lote en cuarentena, y la carpeta `data/quarantine/<run_id>/` contiene `filas_cuarentena.parquet` (cada fila con su motivo) y `reporte.json`.
 
 ```bash
 docker compose exec airflow-scheduler airflow dags trigger etl_calidad_aire --conf '{"prueba_falla_calidad": true}'
@@ -242,7 +244,7 @@ uv sync
 uv run pytest
 ```
 
-Pruebas de las suites de Great Expectations (incluye datos corruptos que deben bloquear la carga) y del DAG, dentro del contenedor:
+Pruebas de las suites de Great Expectations (incluye datos corruptos que deben bloquear la carga y la identificación de filas para cuarentena) y del DAG, dentro del contenedor:
 
 ```bash
 docker compose run --rm tests
@@ -262,6 +264,7 @@ notebooks/       EDA de las cuatro fuentes
 test/            pruebas unitarias
 docs/            documento técnico, diagramas y capturas
 data/raw/        copias comprimidas de los datos de origen
+data/quarantine/ filas inválidas de los lotes enviados a cuarentena (se genera al ejecutar)
 docker/          Dockerfiles de Airflow y del dashboard
 docker-compose.yml, requirements-*.txt, .env.example
 ```
@@ -270,7 +273,8 @@ docker-compose.yml, requirements-*.txt, .env.example
 
 - **Airflow en Docker Compose con LocalExecutor**: un solo comando levanta el proyecto y es reproducible en cualquier equipo; no se necesita Celery ni Redis para este volumen.
 - **PostgreSQL parametrizado por variables de entorno**: por defecto un contenedor local, y Supabase u otro servidor cambiando solo el `.env`.
-- **Great Expectations dentro del DAG y con severidades**: reglas críticas bloquean la carga; las advertencias solo informan.
+- **Great Expectations dentro del DAG y con severidades**: reglas críticas envían el lote a cuarentena y bloquean la carga; las advertencias solo informan.
+- **Cuarentena del lote completo**: si falla una regla crítica no se carga nada de ese lote, porque mezclar filas buenas y malas podría dejar el almacén inconsistente; las filas inválidas quedan identificadas con su motivo para corregirlas y reprocesar.
 - **Extracción incremental de la API**: se piden solo los días posteriores al último cargado, lo que reduce las peticiones y respeta los límites.
 - **Ubicación canónica y tabla de países**: resuelve nombres en otros idiomas y coordenadas cambiantes en el origen.
 - **Scraping acotado a una tabla estable**: se extrae una sola tabla de una página con licencia abierta, con `User-Agent` propio y tiempo máximo de espera; si la estructura cambia, la tarea falla en lugar de cargar datos incorrectos.
