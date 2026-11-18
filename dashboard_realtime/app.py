@@ -18,7 +18,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.kafka_consumer import ConsumidorPrediccion, EstadoEnVivo
+from src.kafka_consumer import ConsumidorPrediccion, EstadoEnVivo, logger
 
 st.set_page_config(page_title="Real-time PM2.5 forecast", layout="wide")
 
@@ -36,6 +36,7 @@ def iniciar_consumo():
                 estado.error = None
                 consumidor.ejecutar()
             except Exception as error:  # noqa: BLE001 - se muestra en pantalla y se reintenta
+                logger.exception("el consumidor se detuvo con un error")
                 estado.error = str(error)
                 time.sleep(5)
 
@@ -132,6 +133,7 @@ def panel():
 
 
 panel()
+
 
 
 
