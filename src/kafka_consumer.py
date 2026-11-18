@@ -23,6 +23,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 from confluent_kafka import Consumer, KafkaException
+from threadpoolctl import threadpool_limits
 from sqlalchemy import text
 
 from src.ml_contract import FEATURES, validar_evento
@@ -48,7 +49,9 @@ def cargar_modelo() -> tuple[object, dict]:
 def predecir_evento(modelo, evento: dict) -> float:
     """Aplica el pipeline ajustado (preprocesamiento + modelo) a un solo evento."""
     fila = pd.DataFrame([{campo: evento.get(campo) for campo in FEATURES}])
-    return float(modelo.predict(fila)[0])
+    # una sola fila no se beneficia de varios hilos; limitarlos evita esperas activas y compite menos por la CPU
+    with threadpool_limits(limits=1):
+        return float(modelo.predict(fila)[0])
 
 
 def guardar_predicciones(registros: list[dict]) -> None:
@@ -192,4 +195,5 @@ if __name__ == "__main__":
     analizador.add_argument("--grupo", default=None)
     argumentos = analizador.parse_args()
     ConsumidorPrediccion(grupo=argumentos.grupo).ejecutar(argumentos.max_mensajes, argumentos.inactividad)
+
 
