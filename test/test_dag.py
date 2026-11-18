@@ -48,7 +48,13 @@ def test_la_calidad_mala_envia_el_lote_a_cuarentena(dag):
     assert dag.get_task("quarantine_data").upstream_task_ids == {"validate_quality"}
 
 
+def test_la_publicacion_en_kafka_ocurre_solo_despues_de_cargar(dag):
+    assert dag.get_task("publish_to_kafka").upstream_task_ids == {"load_dw"}
+    assert dag.get_task("quarantine_data").downstream_task_ids == set()
+
+
 def test_programacion_diaria(dag):
     assert dag.schedule == "@daily"
+
 
 
