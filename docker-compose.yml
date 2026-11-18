@@ -176,6 +176,10 @@ services:
       PROJECT_ROOT: /app
       PYTHONPATH: /app
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # pocos hilos y sin espera activa: con muchos nucleos, los hilos de OpenMP de varios contenedores se disputan la CPU
+      OMP_NUM_THREADS: "4"
+      OMP_WAIT_POLICY: PASSIVE
+      OPENBLAS_NUM_THREADS: "1"
     ports:
       - "8502:8502"
     volumes:
@@ -241,3 +245,4 @@ volumes:
   airflow-db-data:
   warehouse-data:
   kafka-data:
+
