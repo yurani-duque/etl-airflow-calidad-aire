@@ -1,0 +1,93 @@
+{
+  "version": "cambio_diario_hgb_ensamble-20261118",
+  "modelo": "cambio_diario_hgb_ensamble",
+  "objetivo": "target_pm25_next_day",
+  "descripcion_objetivo": "PM2.5 del dia siguiente (ug/m3) en cada ciudad",
+  "umbral_alerta_oms": 15,
+  "margen_alerta": 13,
+  "regla_alerta": "se alerta cuando el PM2.5 previsto supera 13 ug/m3 (margen de precaucion bajo la guia de 15)",
+  "features": [
+    "pm2_5",
+    "pm10",
+    "co",
+    "no2",
+    "so2",
+    "ozone",
+    "temperature_celsius",
+    "humidity",
+    "wind_kph",
+    "pressure_mb",
+    "precip_mm",
+    "cloud",
+    "uv_index",
+    "pm25_lag1",
+    "pm25_lag2",
+    "pm25_lag3",
+    "pm25_lag7",
+    "pm25_mean_3d",
+    "pm25_mean_7d",
+    "pm25_std_7d",
+    "pm25_mean_30d",
+    "ratio_today_7d",
+    "delta_temp",
+    "delta_pressure",
+    "delta_wind",
+    "month",
+    "day_of_week",
+    "latitude",
+    "co2_per_capita",
+    "gdp_per_capita",
+    "energy_per_capita",
+    "pm25_annual_web",
+    "iso3"
+  ],
+  "features_categoricas": [
+    "iso3"
+  ],
+  "entrenado_en": "2026-11-18T15:44:49+00:00",
+  "sklearn": "1.9.1",
+  "filas_entrenamiento": 158064,
+  "filas_prueba": 21753,
+  "entrenamiento_desde": "2024-05-16",
+  "entrenamiento_hasta": "2026-08-18",
+  "prueba_desde": "2026-08-20",
+  "prueba_hasta": "2026-11-17",
+  "metricas": {
+    "modelo": {
+      "mae": 4.088,
+      "rmse": 8.373,
+      "r2": 0.8046,
+      "alerta_precision": 0.7594,
+      "alerta_recall": 0.8848,
+      "alerta_f1": 0.8173
+    },
+    "linea_base_persistencia": {
+      "mae": 4.389,
+      "rmse": 9.213,
+      "r2": 0.7634,
+      "alerta_precision": 0.7378,
+      "alerta_recall": 0.8854,
+      "alerta_f1": 0.8049
+    },
+    "linea_base_media_7d": {
+      "mae": 5.526,
+      "rmse": 10.711,
+      "r2": 0.6803,
+      "alerta_precision": 0.6878,
+      "alerta_recall": 0.8225,
+      "alerta_f1": 0.7492
+    }
+  },
+  "mayor_error_por_ciudad": {
+    "Riyadh": 55.09,
+    "Beijing": 25.39,
+    "Kuwait City": 18.74,
+    "Nouakchott": 16.79,
+    "New Delhi": 16.45,
+    "Kuala Lumpur": 12.95,
+    "Moscow": 12.09,
+    "Dhaka": 11.93,
+    "Santiago": 10.86,
+    "Kinshasa": 10.41
+  }
+}
