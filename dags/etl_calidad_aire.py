@@ -6,10 +6,11 @@ Fase ETL: Orquestacion (Extraccion + Transformacion + Validacion + Carga)
 Descripcion: DAG de Airflow que extrae datos de cuatro fuentes (CSV historico, base de datos
     de emisiones, API Open-Meteo y tabla web de contaminacion por pais), los transforma, los
     une y valida su calidad con Great Expectations. Si la calidad es buena, el lote se carga
-    al Data Warehouse; si es mala, el lote va a cuarentena y se emite una alerta.
+    al Data Warehouse y se publican en Kafka las variables de entrada del modelo; si es mala,
+    el lote va a cuarentena y se emite una alerta.
 Entradas: CSV historico, tabla source.owid_co2, API Open-Meteo, pagina web (scraping)
-Salidas: tablas del esquema dw en PostgreSQL y, si hay datos invalidos, data/quarantine/<run_id>
-Notas: programado diariamente; validate_quality decide la ruta: load_dw o quarantine_data
+Salidas: tablas del esquema dw en PostgreSQL, eventos en Kafka y, si hay datos invalidos, data/quarantine/<run_id>
+Notas: programado diariamente; validate_quality decide la ruta: load_dw (y luego publish_to_kafka) o quarantine_data
 """
 
 from datetime import datetime, timedelta
@@ -43,7 +44,11 @@ def run_id_actual() -> str:
         "prueba_falla_calidad": Param(
             False, type="boolean",
             description="Activar para inyectar datos invalidos y comprobar que la validacion bloquea la carga",
-        )
+        ),
+        "kafka_dias": Param(
+            1, type="integer", minimum=1, maximum=30,
+            description="Dias recientes cuyas variables de entrada se publican en Kafka despues de la carga",
+        ),
     },
 )
 def etl_calidad_aire():
@@ -108,6 +113,14 @@ def etl_calidad_aire():
         return poner_en_cuarentena(run_id_actual())
 
     @task
+    def publish_to_kafka() -> dict:
+        """Publica en Kafka las variables de entrada de los ultimos dias cargados, ya validados."""
+        from src.kafka_producer import publicar_ultimos_dias
+
+        dias = int(get_current_context()["params"].get("kafka_dias", 1))
+        return publicar_ultimos_dias(dias)
+
+    @task
     def load_dw() -> int:
         from src.load_dw import cargar_dw, registrar_ejecucion
 
@@ -119,12 +132,14 @@ def etl_calidad_aire():
     csv_crudo, db_crudo, api_crudo, web_crudo = extract_csv(), extract_db(), extract_api(), extract_web()
     csv_limpio, owid_limpio, api_limpio, web_limpio = transform_csv(), transform_owid(), transform_api(), transform_web()
     unido, validado, cargado, cuarentena = merge_sources(), validate_quality(), load_dw(), quarantine_data()
+    publicado = publish_to_kafka()
 
     csv_crudo >> csv_limpio
     db_crudo >> owid_limpio
     api_crudo >> api_limpio
     web_crudo >> web_limpio
     [csv_limpio, owid_limpio, api_limpio, web_limpio] >> unido >> validado >> [cargado, cuarentena]
+    cargado >> publicado
 
 
 etl_calidad_aire()
