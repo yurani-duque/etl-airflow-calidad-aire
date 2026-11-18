@@ -415,7 +415,8 @@ docker-compose.yml, requirements-*.txt, .env.example
 - **Dataset de predicción como vista SQL**: el entrenamiento y el productor leen exactamente las mismas columnas del modelo dimensional.
 - **Predecir el cambio diario y comparar siempre contra "mañana = hoy"**: la línea base es fuerte; el modelo solo aporta si la supera.
 - **El consumidor valida antes de predecir**: un mensaje inválido se descarta y se cuenta, no se predice.
-- **Modelo versionado en el repositorio** (1.8 MB): el consumidor funciona tras clonar, y la imagen de streaming fija las versiones para que el `.pkl` siempre cargue.
+- **Modelo versionado en el repositorio** (3.6 MB): el consumidor funciona tras clonar, y la imagen de streaming fija las versiones para que el `.pkl` siempre cargue.
+- **Hilos de OpenMP limitados** (OMP_NUM_THREADS=4, espera pasiva): con muchos núcleos visibles, cada contenedor con scikit-learn lanzaba un hilo por núcleo y, al convivir el dashboard, el entrenamiento y las pruebas, todo se volvía decenas de veces más lento (las pruebas pasaron de 274 s a 7 s). La inferencia de un solo mensaje usa un hilo.
 - **Python 3.12 en los contenedores**: Great Expectations 1.x aún no soporta Python 3.14, que se usa en el entorno local con `uv`.
 
 ## 20. Limitaciones
@@ -447,3 +448,4 @@ docker-compose.yml, requirements-*.txt, .env.example
 - PM2.5 anual por país y años de vida perdidos: [Wikipedia, List of countries by air pollution](https://en.wikipedia.org/wiki/List_of_countries_by_air_pollution) (CC BY-SA 4.0), que a su vez cita datos del Banco Mundial y de la OMS.
 - Lecturas históricas: [World Weather Repository, Kaggle](https://www.kaggle.com/datasets/nelgiriyewithana/global-weather-repository), publicado por Nidula Elgiriyewithana.
 - Guía de calidad del aire de la OMS (2021) para el umbral de PM2.5 de 15 µg/m³ en 24 horas.
+
