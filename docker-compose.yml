@@ -20,6 +20,7 @@ x-airflow-common: &airflow-common
     PROJECT_ROOT: /opt/airflow/app
     PYTHONPATH: /opt/airflow/app
     LOG_DIR: /opt/airflow/logs
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   volumes:
     - ./dags:/opt/airflow/dags
     - ./src:/opt/airflow/app/src
@@ -138,6 +139,105 @@ services:
         condition: service_healthy
     command: ["streamlit", "run", "dashboard/app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
 
+  kafka:
+    image: apache/kafka:3.9.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9094:9094"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  realtime:
+    build:
+      context: .
+      dockerfile: docker/streaming.Dockerfile
+    image: etl-airflow-calidad-aire-streaming:latest
+    env_file: .env
+    working_dir: /app
+    environment: &streaming-env
+      PROJECT_ROOT: /app
+      PYTHONPATH: /app
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "8502:8502"
+    volumes:
+      - ./src:/app/src
+      - ./utils:/app/utils
+      - ./config:/app/config
+      - ./models:/app/models
+      - ./dashboard_realtime:/app/dashboard_realtime
+    depends_on:
+      warehouse:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    command: ["streamlit", "run", "dashboard_realtime/app.py", "--server.port=8502", "--server.address=0.0.0.0", "--server.headless=true"]
+
+  trainer:
+    image: etl-airflow-calidad-aire-streaming:latest
+    profiles: ["train"]
+    env_file: .env
+    working_dir: /app
+    environment: *streaming-env
+    volumes:
+      - ./src:/app/src
+      - ./utils:/app/utils
+      - ./config:/app/config
+      - ./models:/app/models
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    command: ["python", "-m", "src.train_model"]
+
+  report:
+    image: etl-airflow-calidad-aire-streaming:latest
+    profiles: ["report"]
+    env_file: .env
+    working_dir: /app
+    environment: *streaming-env
+    volumes:
+      - ./src:/app/src
+      - ./utils:/app/utils
+      - ./config:/app/config
+      - ./models:/app/models
+      - ./reports:/app/reports
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    command: ["python", "-m", "reports.generate_report"]
+
+  streaming-tests:
+    image: etl-airflow-calidad-aire-streaming:latest
+    profiles: ["test"]
+    working_dir: /app
+    environment: *streaming-env
+    volumes:
+      - ./src:/app/src
+      - ./utils:/app/utils
+      - ./config:/app/config
+      - ./models:/app/models
+      - ./test:/app/test
+    command: ["python", "-m", "pytest", "test/test_ml_streaming.py", "-q", "-p", "no:cacheprovider"]
+
 volumes:
   airflow-db-data:
   warehouse-data:
+  kafka-data:

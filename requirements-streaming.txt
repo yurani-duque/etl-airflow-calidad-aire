@@ -1,0 +1,13 @@
+pandas
+numpy
+scikit-learn
+joblib
+confluent-kafka
+streamlit
+plotly
+matplotlib
+sqlalchemy
+psycopg2-binary
+python-dotenv
+pyyaml
+pytest
