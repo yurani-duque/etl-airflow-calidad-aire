@@ -91,7 +91,7 @@ def panel():
     top["city"] = top["location_name"] + " (" + top["country"] + ")"
     grafica = px.bar(top, x="predicted", y="city", orientation="h", color="alert",
                      color_discrete_map={True: "#c0392b", False: "#2e86c1"},
-                     labels={"predicted": f"Predicted PM2.5 for tomorrow (µg/m³)   |   dotted: alert margin {margen}, dashed: WHO guideline {umbral}", "city": "", "alert": "Alert"})
+                     labels={"predicted": f"Predicted PM2.5 for tomorrow (µg/m³)<br>dotted: alert ({margen}) · dashed: WHO ({umbral})", "city": "", "alert": "Alert"})
     grafica.add_vline(x=margen, line_dash="dot")
     grafica.add_vline(x=umbral, line_dash="dash")
     grafica.update_layout(height=420, margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
@@ -132,5 +132,7 @@ def panel():
 
 
 panel()
+
+
 
 
