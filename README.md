@@ -1,45 +1,75 @@
-# ETL de clima, calidad del aire y emisiones con Airflow
+# ETL de clima, calidad del aire y emisiones: Airflow, Kafka y predicción en tiempo real
 
-Pipeline ETL orquestado con Apache Airflow que integra cuatro fuentes (un CSV histórico, una base de datos, una API pública y una tabla web extraída con scraping), valida su calidad con Great Expectations, carga un Data Warehouse en PostgreSQL con modelo estrella solo los lotes que la superan y envía a cuarentena los que no. Un dashboard en Streamlit consulta únicamente los datos ya validados. El proyecto está alineado con el ODS 11 (calidad del aire urbano) y el ODS 13 (acción por el clima).
+Proyecto de ingeniería de datos que integra cuatro fuentes (un CSV histórico, una base de datos, una API pública y una tabla web extraída con scraping) en un pipeline orquestado con Apache Airflow, valida su calidad con Great Expectations y carga un Data Warehouse en PostgreSQL con modelo estrella solo con los lotes que pasan la validación (los demás van a cuarentena). Sobre ese mismo almacén se apoyan **dos formas de consumir los datos**:
+
+- **Analítica:** un informe estático generado con Python y un dashboard, ambos sobre el modelo dimensional validado.
+- **Operativa:** un modelo de aprendizaje automático que predice el PM2.5 del día siguiente en cada ciudad, un productor de Kafka que publica las variables de entrada y un consumidor que predice cada mensaje y alimenta un dashboard en tiempo real.
+
+El proyecto está alineado con el ODS 11 (calidad del aire urbano) y el ODS 13 (acción por el clima).
 
 Curso ETL (G51), Ingeniería de Datos e Inteligencia Artificial, Universidad Autónoma de Occidente. Autoras: Yurani Duque y Valentina Velasco.
 
-Este proyecto parte del dataset del proyecto anterior del curso ([etl-clima-calidad-aire](https://github.com/yurani-duque/etl-clima-calidad-aire)), que cargaba un CSV a un esquema estrella. Aquí se automatiza con Airflow, se suman tres fuentes nuevas (base de datos, API y web), se valida la calidad antes de cargar y se agrega un dashboard.
+![Arquitectura final](docs/img/arquitectura_final.png)
 
 ## Contenido
 
 1. [Objetivos refinados](#1-objetivos-refinados)
-2. [Arquitectura](#2-arquitectura)
-3. [Fuentes de datos](#3-fuentes-de-datos)
-4. [EDA y hallazgos](#4-eda-y-hallazgos)
-5. [Pasos del pipeline ETL](#5-pasos-del-pipeline-etl)
-6. [Diseño del DAG de Airflow](#6-diseño-del-dag-de-airflow)
-7. [Validación con Great Expectations](#7-validación-con-great-expectations)
-8. [Modelo de datos](#8-modelo-de-datos)
-9. [Visualizaciones e insights](#9-visualizaciones-e-insights)
-10. [Puesta en marcha](#10-puesta-en-marcha)
-11. [Pruebas](#11-pruebas)
-12. [Estructura del repositorio](#12-estructura-del-repositorio)
-13. [Decisiones clave](#13-decisiones-clave)
-14. [Solución de problemas](#14-solución-de-problemas)
-15. [Licencias y atribución de datos](#15-licencias-y-atribución-de-datos)
+2. [Evolución del proyecto](#2-evolución-del-proyecto)
+3. [Arquitectura](#3-arquitectura)
+4. [Fuentes de datos](#4-fuentes-de-datos)
+5. [EDA y hallazgos](#5-eda-y-hallazgos)
+6. [Pasos del pipeline ETL](#6-pasos-del-pipeline-etl)
+7. [Diseño del DAG de Airflow](#7-diseño-del-dag-de-airflow)
+8. [Validación con Great Expectations](#8-validación-con-great-expectations)
+9. [Modelo dimensional y métrica publicada](#9-modelo-dimensional-y-métrica-publicada)
+10. [Eventos de Kafka: productor y consumidor](#10-eventos-de-kafka-productor-y-consumidor)
+11. [Modelo de aprendizaje automático](#11-modelo-de-aprendizaje-automático)
+12. [Informe estático](#12-informe-estático)
+13. [Dashboard en tiempo real](#13-dashboard-en-tiempo-real)
+14. [Valor analítico y operativo](#14-valor-analítico-y-operativo)
+15. [Visualizaciones e insights](#15-visualizaciones-e-insights)
+16. [Puesta en marcha](#16-puesta-en-marcha)
+17. [Pruebas](#17-pruebas)
+18. [Estructura del repositorio](#18-estructura-del-repositorio)
+19. [Decisiones clave](#19-decisiones-clave)
+20. [Limitaciones](#20-limitaciones)
+21. [Solución de problemas](#21-solución-de-problemas)
+22. [Licencias y atribución de datos](#22-licencias-y-atribución-de-datos)
 
 ## 1. Objetivos refinados
 
-El proyecto anterior solo respondía qué ciudades tienen peor aire a partir de un CSV. Con las nuevas fuentes el objetivo es más amplio:
+La primera entrega solo respondía qué ciudades tienen peor aire a partir de un CSV. Con las nuevas fuentes y el streaming el objetivo es más amplio:
 
 1. Monitorear de forma continua la calidad del aire de 260 ciudades capitales frente a la guía de la OMS para PM2.5 (15 µg/m³ en 24 horas), extendiendo el histórico del CSV con datos diarios de una API.
 2. Relacionar el aire de cada ciudad con las emisiones de CO₂, el PIB y la energía per cápita de su país, para ver si el nivel de emisiones o de ingreso se asocia con la contaminación.
 3. Contrastar la medición de cada ciudad con el promedio anual de PM2.5 de su país y con los años de vida perdidos por la contaminación, publicados en una tabla web.
 4. Garantizar que solo se cargan datos válidos: cada ejecución se valida y, si falla una regla crítica, el lote va a cuarentena, se emite una alerta y la carga no se ejecuta.
+5. Predecir el PM2.5 del día siguiente en cada ciudad para emitir una alerta temprana cuando se prevea superar un margen bajo la guía de la OMS, y mostrarlo en tiempo real.
 
 Preguntas que guían el modelo: ¿qué ciudades superan la guía de la OMS y con qué frecuencia?, ¿se relaciona la contaminación con las emisiones y el ingreso del país?, ¿cómo evoluciona el PM2.5 y qué tan frescos están los datos?, ¿en qué estado está la calidad del dato?
 
-## 2. Arquitectura
+## 2. Evolución del proyecto
+El proyecto creció en tres entregas, y cada una corrigió supuestos de la anterior:
 
-![Arquitectura](docs/img/arquitectura.png)
+| Entrega | Qué se construyó | Supuesto que hubo que corregir |
+|---|---|---|
+| **1. ETL y modelo estrella** ([repositorio](https://github.com/yurani-duque/etl-clima-calidad-aire)) | Un CSV de clima y calidad del aire (World Weather Repository) limpiado y cargado a un esquema estrella en PostgreSQL | "Una ciudad es un nombre": había 286 nombres para 260 ciudades reales, con coordenadas que cambiaban y países en otros idiomas |
+| **2. Airflow, calidad y API** | DAG con tres extracciones en paralelo (CSV, base de datos de emisiones, API Open-Meteo), validación con Great Expectations antes de cargar, cuarentena de lotes inválidos y dashboard | "La API se parece al CSV": entrega horas y el CSV una lectura por día; la API tiene cuotas, así que la extracción pasó a ser incremental. Se sumó una cuarta fuente (tabla web) por scraping |
+| **3. Streaming y ML (final)** | Vista de predicción sobre el modelo dimensional, modelo del PM2.5 del día siguiente, productor y consumidor de Kafka, dashboard en tiempo real e informe estático | "Si el modelo se entrena, el problema está resuelto": la línea base "mañana = hoy" ya es muy fuerte, así que se compara siempre contra ella y se reporta una mejora moderada |
 
-Todo corre con Docker Compose: Airflow (API server, scheduler y DAG processor), un PostgreSQL para los metadatos de Airflow, un PostgreSQL que actúa como Data Warehouse y como base de datos fuente, y el dashboard.
+Otros quiebres técnicos que se resolvieron en el camino:
+
+- **Great Expectations no soporta Python 3.14**: los contenedores usan Python 3.12 y el entorno local, `uv` con 3.14.
+- **Una lectura de 79.3 °C en Fiyi** (error del origen) y **picos de PM10 de 6,000 µg/m³** (tormentas de polvo reales): lo primero se descarta, lo segundo se conserva y se ajusta el límite de validación a 10,000.
+- **La calidad mala no podía solo detener el flujo**: por indicación del docente, la validación ahora enruta el lote a cuarentena con una alerta.
+- **No todas las ciudades tienen el mismo "último día"**: el productor publica el último día disponible de cada ciudad, no el último día global (con la segunda opción solo se publicaban 23 de 260 ciudades).
+- **El esquema de eventos cambió** al agregar variables al modelo: el consumidor descartó correctamente los eventos antiguos por validación en lugar de predecir con datos incompletos.
+
+## 3. Arquitectura
+
+![Arquitectura](docs/img/arquitectura_final.png)
+
+Todo corre con Docker Compose: Airflow (API server, scheduler y DAG processor), un PostgreSQL para los metadatos de Airflow, un PostgreSQL que actúa como Data Warehouse y como base de datos fuente, Kafka (modo KRaft, un solo nodo), el dashboard analítico y la aplicación en tiempo real (consumidor + dashboard).
 
 | Capa | Herramienta | Propósito |
 |---|---|---|
@@ -48,10 +78,13 @@ Todo corre con Docker Compose: Airflow (API server, scheduler y DAG processor), 
 | Transformación | Python y pandas | limpieza, normalización y unión |
 | Calidad | Great Expectations 1.23 | validar antes de cargar |
 | Almacenamiento | PostgreSQL 16 (o Supabase) | Data Warehouse en esquema `dw` |
-| Visualización | Streamlit y Plotly | dashboard sobre el Data Warehouse |
+| Streaming | Apache Kafka 3.9 y `confluent-kafka` | transportar los eventos con las variables de entrada del modelo |
+| Aprendizaje automático | scikit-learn | modelo de predicción del PM2.5 del día siguiente |
+| Reporte estático | Python, matplotlib | informe HTML sobre el modelo dimensional |
+| Visualización | Streamlit y Plotly | dashboard analítico (puerto 8501) y dashboard en tiempo real (puerto 8502) |
 | Versionamiento | Git y GitHub | código, configuración y documentación |
 
-## 3. Fuentes de datos
+## 4. Fuentes de datos
 
 | # | Fuente | Acceso | Contenido |
 |---|---|---|---|
@@ -66,9 +99,9 @@ Todo corre con Docker Compose: Airflow (API server, scheduler y DAG processor), 
 
 **Por qué la tabla web.** Aporta un dato que ninguna otra fuente tiene: el PM2.5 anual de cada país y su efecto en la esperanza de vida. Permite contrastar la medición de una ciudad con la referencia nacional. Se eligió una página estable, con estructura de tabla y licencia abierta (CC BY-SA). Como la cifra es anual, no cambia entre ejecuciones diarias; se vuelve a descargar en cada corrida para que el DAG siga siendo autocontenido. La extracción se identifica con un `User-Agent`, tiene tiempo máximo de espera y falla de forma explícita si la tabla cambia de estructura.
 
-## 4. EDA y hallazgos
+## 5. EDA y hallazgos
 
-El análisis está en [`notebooks/eda_fuentes.ipynb`](notebooks/eda_fuentes.ipynb) (estructura, tipos, nulos, duplicados y atípicos de las cuatro fuentes). Los hallazgos determinan las transformaciones:
+Los análisis están en [`notebooks/eda_entrega1_clima_calidad_aire.ipynb`](notebooks/eda_entrega1_clima_calidad_aire.ipynb) (EDA de la primera entrega) y [`notebooks/eda_fuentes.ipynb`](notebooks/eda_fuentes.ipynb) (estructura, tipos, nulos, duplicados y atípicos de las cuatro fuentes, segunda entrega). Los hallazgos determinan las transformaciones:
 
 | Hallazgo | Decisión |
 |---|---|
@@ -86,7 +119,7 @@ El análisis está en [`notebooks/eda_fuentes.ipynb`](notebooks/eda_fuentes.ipyn
 
 ![Distribuciones del CSV](docs/img/eda_distribuciones_csv.png)
 
-## 5. Pasos del pipeline ETL
+## 6. Pasos del pipeline ETL
 
 | Paso | Módulo | Qué hace |
 |---|---|---|
@@ -116,17 +149,18 @@ El análisis está en [`notebooks/eda_fuentes.ipynb`](notebooks/eda_fuentes.ipyn
 - El PM2.5 nacional de la web es un promedio anual por país, no una lectura diaria. La medida `pm25_vs_national` (lectura diaria menos promedio anual del país) sirve para comparar, no para sustituir la medición de la ciudad. Los años de vida perdidos se guardan como magnitud positiva.
 - Un país con ciudades pero sin fila en la web queda con esos campos nulos; la columna `pm25_vs_national` también.
 
-## 6. Diseño del DAG de Airflow
+## 7. Diseño del DAG de Airflow
 
 DAG `etl_calidad_aire`, programado `@daily`, con `catchup=False` y una sola ejecución activa a la vez.
 
 ![Grafo del DAG](docs/img/airflow_dag_bloqueado.jpg)
 
-- **Cuatro extracciones independientes** (`extract_csv`, `extract_db`, `extract_api`, `extract_web`) que corren en paralelo, cada una con su transformación (12 tareas en total).
+- **Cuatro extracciones independientes** (`extract_csv`, `extract_db`, `extract_api`, `extract_web`) que corren en paralelo, cada una con su transformación (13 tareas en total).
 - `merge_sources` espera las cuatro transformaciones.
 - `validate_quality` ejecuta Great Expectations y **decide la ruta** (es una tarea de ramificación): si la calidad es buena sigue a `load_dw`; si falla una regla crítica el flujo continúa por `quarantine_data` y `load_dw` queda omitido (`skipped`). En la imagen, un run con datos inválidos inyectados: el lote termina en cuarentena.
 - `quarantine_data` identifica las filas inválidas del lote con su motivo, las guarda en `data/quarantine/<run_id>/`, registra el lote en `dw.quarantine_log`, deja la ejecución con estado `quarantined` en `dw.etl_run_log` y emite una alerta en el log de la tarea. El Data Warehouse no cambia.
 - `load_dw` carga el Data Warehouse y registra la ejecución.
+- `publish_to_kafka` (solo después de una carga exitosa) lee de `dw.v_prediction_features` el último día de cada ciudad y publica un evento por ciudad en el tópico `air_quality_features`. Parámetro `kafka_dias` (1 por defecto) para publicar más días.
 - Reintentos: 2 por tarea con 2 minutos de espera. Un fallo que no es temporal, como un archivo CSV dañado, agota los reintentos, falla la tarea y requiere intervención. Un `on_failure_callback` registra cualquier fallo en `dw.etl_run_log`.
 - Los datos pasan entre tareas como archivos parquet en `data/staging/<run_id>/`, no por XCom.
 - Parámetro `prueba_falla_calidad` (falso por defecto): al activarlo, `merge_sources` agrega filas inválidas para demostrar la cuarentena del lote.
@@ -135,7 +169,7 @@ Una ejecución exitosa:
 
 ![Ejecución exitosa](docs/img/airflow_ejecucion_exitosa.jpg)
 
-## 7. Validación con Great Expectations
+## 8. Validación con Great Expectations
 
 Las suites se definen en `src/quality.py` y se versionan como JSON en `gx/expectations/`. Cada expectativa es **crítica** (envía el lote a cuarentena y bloquea la carga) o **advertencia** (solo se registra). El resultado de cada expectativa se guarda en `dw.dq_validation_log` y se generan Data Docs en `gx/uncommitted/data_docs/`.
 
@@ -150,8 +184,7 @@ Las suites se definen en `src/quality.py` y se versionan como JSON en `gx/expect
 
 La imagen muestra la validación de un run con datos inválidos: 15 de 17 expectativas cumplidas y dos críticas fallidas (humedad fuera de rango y filas repetidas), suficiente para enviar el lote a cuarentena.
 
-## 8. Modelo de datos
-
+## 9. Modelo dimensional y métrica publicada
 Esquema estrella en el esquema `dw` (DDL en [`dwh_version/001_create_dw_schema.sql`](dwh_version/001_create_dw_schema.sql)):
 
 ![Modelo estrella](docs/img/modelo_estrella.png)
@@ -159,10 +192,90 @@ Esquema estrella en el esquema `dw` (DDL en [`dwh_version/001_create_dw_schema.s
 - **Hechos** `fact_air_quality`: una fila por ciudad, día y fuente, con clima, contaminantes, índice EPA, razón contra la guía OMS y bandera `pm25_exceeds_who`, más `pm25_vs_national` (lectura menos el PM2.5 anual del país).
 - **Dimensiones**: `dim_location`, `dim_date`, `dim_source` y `dim_country_indicator` (una fila por país, con los indicadores de OWID y el PM2.5 anual y los años de vida perdidos de la web).
 - **Auditoría**: `dq_validation_log` (resultados de validación), `quarantine_log` (lotes enviados a cuarentena) y `etl_run_log` (estado de cada ejecución: `success`, `quarantined` o `failed`).
+- **Salida del modelo**: `dw.predictions` guarda cada predicción del consumidor (entradas, predicción, alerta, versión del modelo y latencia).
 
-## 9. Visualizaciones e insights
+**Métrica publicada en Kafka.** `fact_air_quality.pm2_5`: PM2.5 diario en µg/m³ (el CSV trae una lectura puntual por día y la API un promedio diario; la columna `source` los distingue). La guía diaria de la OMS es 15 µg/m³.
+**Grano.** Un hecho por ciudad, día y fuente (clave única `(location_id, date_id, source_id)`).
+**Dataset de predicción.** La vista `dw.v_prediction_features` (una fila por ciudad y día) combina los hechos con las dimensiones y calcula, **solo con días anteriores**, los rezagos (1, 2, 3 y 7 días), las medias móviles (3, 7 y 30 días), la desviación de 7 días, las variaciones de temperatura, presión y viento y el cociente de hoy contra la media de 7 días. El objetivo (`target_pm25_next_day`) es el PM2.5 del día siguiente y queda nulo en el último día de cada ciudad: esas filas son las que se publican.
+**Repeticiones del DAG.** La carga es idempotente: los hechos del CSV usan `ON CONFLICT DO NOTHING`, los de la API `DO UPDATE`, y repetir una ejecución no duplica datos. Las predicciones usan `event_id` como clave primaria y `ON CONFLICT DO NOTHING`.
 
-El dashboard ([`dashboard/app.py`](dashboard/app.py)) solo consulta el esquema `dw`, es decir, datos ya validados.
+## 10. Eventos de Kafka: productor y consumidor
+- **Tópico:** `air_quality_features` (3 particiones, 1 réplica). **Clave del mensaje:** `location_key`, así que los eventos de una ciudad llegan en orden a la misma partición. **Formato:** JSON.
+- **Productor** ([`src/kafka_producer.py`](src/kafka_producer.py)): lee de `dw.v_prediction_features` los últimos días de cada ciudad y publica un evento por fila con una pausa corta (`producer_delay_seconds`, 0.05 s). Se ejecuta como tarea del DAG (`publish_to_kafka`) y también por separado: `python -m src.kafka_producer --dias 3`. **No incluye el objetivo** (evitaría fuga de datos) y valida la entrega de cada mensaje.
+- **Consumidor** ([`src/kafka_consumer.py`](src/kafka_consumer.py)): carga el modelo serializado **una sola vez**, valida cada mensaje (estructura, tipos, rangos, fecha y que no traiga el objetivo), descarta los inválidos con su motivo, predice **una vez por mensaje válido** y guarda el resultado en `dw.predictions`. No reentrena.
+
+**Estructura del evento** (campos de [`src/ml_contract.py`](src/ml_contract.py)):
+
+| Grupo | Campos |
+|---|---|
+| Identificación | `event_id` (UUID), `event_ts` (UTC, ISO 8601), `location_key`, `location_name`, `country`, `iso3`, `latitude`, `longitude`, `feature_date` |
+| Aire de hoy | `pm2_5`, `pm10`, `co`, `no2`, `so2`, `ozone` |
+| Clima de hoy | `temperature_celsius`, `humidity`, `wind_kph`, `pressure_mb`, `precip_mm`, `cloud`, `uv_index` |
+| Historia (solo días anteriores) | `pm25_lag1`, `pm25_lag2`, `pm25_lag3`, `pm25_lag7`, `pm25_mean_3d`, `pm25_mean_7d`, `pm25_std_7d`, `pm25_mean_30d`, `ratio_today_7d`, `delta_temp`, `delta_pressure`, `delta_wind` |
+| Calendario | `month`, `day_of_week` |
+| País (base de datos y web) | `co2_per_capita`, `gdp_per_capita`, `energy_per_capita`, `pm25_annual_web` |
+
+Los valores faltantes viajan como `null`; el modelo los maneja de forma nativa. `pm2_5`, la ubicación, `iso3` y la fecha son obligatorios.
+
+```json
+{"event_id": "28a5fa15-...", "event_ts": "2026-11-18T15:39:57.919Z", "location_key": "AUS|canberra", "feature_date": "2026-11-18",
+ "pm2_5": 5.55, "pm25_lag1": 3.42, "pm25_mean_7d": 4.15, "temperature_celsius": 17.4, "co2_per_capita": 14.48, "iso3": "AUS", "...": "..."}
+```
+
+**Inferencia por mensaje.** `predecir_evento` arma una fila con las columnas del contrato y llama a `modelo.predict`; el resultado se convierte en el PM2.5 previsto, una alerta si supera el margen (13 µg/m³) y la latencia medida (≈ 20-35 ms).
+
+## 11. Modelo de aprendizaje automático
+- **Objetivo:** PM2.5 del día siguiente (µg/m³) en cada ciudad. **Por qué:** avisar con un día de anticipación qué ciudades superarán la guía de la OMS apoya el ODS 11.6 y es un caso operativo claro. **Regla de alerta:** el PM2.5 previsto supera 13 µg/m³, un margen de precaución bajo la guía de 15.
+- **Variables:** las del evento (ver sección anterior). El objetivo nunca entra como variable.
+- **Preprocesamiento:** los numéricos pasan tal cual y los nulos los maneja el modelo de forma nativa; el país (`iso3`) se codifica como categoría y un país no visto recibe -1 sin romper la inferencia.
+- **Modelo** ([`src/ml_model.py`](src/ml_model.py)): predice el **cambio diario** (mañana menos hoy) y se lo suma al valor de hoy, promediando dos `HistGradientBoostingRegressor`: uno con pérdida de error absoluto (robusto a picos) y otro cuadrática (penaliza errores grandes). El preprocesamiento va dentro del objeto, que es lo que se serializa.
+- **Evaluación sin fuga de datos:** división **por fecha** (entrenamiento con lo antiguo y prueba con los últimos 90 días, con un día de separación porque el objetivo es el día siguiente); los rezagos y medias solo usan días anteriores.
+- **Artefactos:** `models/pm25_next_day_model.pkl` (modelo completo, `joblib`) y `models/model_metadata.json` (versión, variables, métricas y rango de fechas). Se versionan para que el consumidor funcione tras clonar el repositorio; se regeneran con `docker compose run --rm trainer`.
+
+Resultados en el periodo de prueba (21,753 ciudad-día, 2026-08-20 a 2026-11-17):
+
+| Modelo | MAE (µg/m³) | RMSE | R² | Alerta: precisión | Alerta: recall | Alerta: F1 |
+|---|---|---|---|---|---|---|
+| **Modelo** | **4.09** | **8.37** | **0.805** | 0.759 | 0.885 | 0.817 |
+| Línea base: mañana = hoy | 4.39 | 9.21 | 0.763 | 0.738 | 0.885 | 0.805 |
+| Línea base: media de 7 días | 5.53 | 10.71 | 0.680 | 0.688 | 0.823 | 0.749 |
+
+La alerta se evalúa con la misma regla para todos (alertar cuando el valor supera 13; acierto si el valor real supera 15).
+
+**Limitaciones.** La mejora sobre "mañana = hoy" es real pero moderada (−7 % en MAE, −9 % en RMSE): el PM2.5 cambia poco de un día a otro. Solo se predice un día. Las ciudades con tormentas de polvo (Riad, Pekín) tienen picos que el modelo subestima. Se mezclan lecturas puntuales (CSV) y promedios diarios (API). No se usa el pronóstico meteorológico del día siguiente, que mejoraría el modelo. Debe reentrenarse si cambian las fuentes. El análisis completo está en [`notebooks/modelo_prediccion.ipynb`](notebooks/modelo_prediccion.ipynb).
+
+## 12. Informe estático
+[`reports/generate_report.py`](reports/generate_report.py) consulta el modelo dimensional validado y genera [`reports/analytical_report.html`](reports/analytical_report.html), un archivo autocontenido (gráficos incrustados) con seis preguntas, su gráfico y un hallazgo calculado a partir de los datos: qué capitales tienen el peor aire, si el aire se relaciona con las emisiones y el ingreso, cómo se comparan las capitales con su país, la estacionalidad, el desempeño del modelo frente a las líneas base y el estado de la calidad de los datos y del flujo en tiempo real.
+
+![Informe estático](docs/img/informe_estatico.jpg)
+
+Es una foto en un momento dado: no se actualiza solo ni muestra mensajes de Kafka. Para regenerarlo:
+
+```bash
+docker compose run --rm report
+```
+
+## 13. Dashboard en tiempo real
+[`dashboard_realtime/app.py`](dashboard_realtime/app.py) es una aplicación de Streamlit **distinta** del dashboard analítico y del informe. Un hilo ejecuta el consumidor de Kafka (`src/kafka_consumer.py`), aplica el modelo a cada evento y alimenta un estado en memoria; la pantalla se refresca cada segundo leyendo ese estado. **No consulta la base de datos para mostrar el flujo.**
+
+![Dashboard en tiempo real](docs/img/dashboard_tiempo_real.jpg)
+
+Muestra las predicciones hechas, los mensajes inválidos descartados, las ciudades en alerta, los mensajes por segundo y la latencia, el ranking y el mapa del PM2.5 previsto, la relación entre hoy y mañana y las últimas predicciones. Disponible en http://localhost:8502.
+
+## 14. Valor analítico y operativo
+| | Camino analítico | Camino operativo |
+|---|---|---|
+| **Pregunta** | ¿Qué ciudades tienen peor aire, por qué y cómo evoluciona? | ¿Qué ciudades tendrán mal aire mañana? |
+| **Datos** | Modelo dimensional completo, validado | Un evento por ciudad con las variables de hoy |
+| **Salida** | Informe estático y dashboard analítico | Predicción y alerta por cada mensaje, en tiempo real |
+| **Quién decide** | Quien define políticas de calidad del aire (ODS 11.6): dónde actuar y con qué prioridad | Quien opera alertas: avisar a la población o activar medidas con un día de anticipación |
+| **Valor** | Entender causas, comparar ciudades y países, medir tendencias | Anticipar y reaccionar a tiempo |
+
+**La misma arquitectura sirve a ambos:** la validación de calidad protege las dos salidas (ningún dato inválido llega al almacén ni se publica en Kafka), y el modelo dimensional es la única fuente de verdad: el informe lo consulta completo y el productor publica de él lo más reciente.
+
+## 15. Visualizaciones e insights
+
+El dashboard analítico ([`dashboard/app.py`](dashboard/app.py), puerto 8501) solo consulta el esquema `dw`, es decir, datos ya validados.
 
 ![Ciudades](docs/img/dashboard_ciudades.jpg)
 
@@ -181,12 +294,12 @@ La pestaña **Calidad de los datos** muestra el estado de la última ejecución,
 
 ![Calidad de los datos](docs/img/dashboard_calidad_datos.jpg)
 
-## 10. Puesta en marcha
+## 16. Puesta en marcha
 
 ### Requisitos
 
-- Docker Desktop con Docker Compose v2 y al menos 8 GB de RAM disponibles para Docker.
-- Puertos libres: 8080 (Airflow), 8501 (dashboard) y 5433 (Data Warehouse).
+- Docker Desktop con Docker Compose v2 y al menos 8 GB de RAM disponibles para Docker (Airflow, Kafka y los dashboards corren a la vez).
+- Puertos libres: 8080 (Airflow), 8501 (dashboard analítico), 8502 (dashboard en tiempo real), 9094 (Kafka) y 5433 (Data Warehouse).
 - Conexión a internet (imágenes de Docker y API).
 
 ### Pasos
@@ -204,7 +317,16 @@ Al arrancar, un servicio de preparación carga el dataset de emisiones en la bas
 
 1. Abrir Airflow en http://localhost:8080 (sin usuario ni contraseña).
 2. Abrir el DAG `etl_calidad_aire` y pulsar **Trigger**. Tarda entre 2 y 5 minutos. El scheduler también puede lanzar una primera ejecución automática al arrancar; ambas son equivalentes porque la carga es idempotente.
-3. Cuando el run termine en `success`, abrir el dashboard en http://localhost:8501.
+3. Cuando el run termine en `success`, abrir el dashboard analítico en http://localhost:8501. La tarea `publish_to_kafka` ya dejó un evento por ciudad en el tópico.
+
+**Camino operativo (Kafka y modelo):**
+
+1. Abrir el dashboard en tiempo real en http://localhost:8502. Al abrirlo arranca el consumidor y procesa los eventos pendientes.
+2. Para ver cómo se actualiza en vivo, publicar más eventos: `docker compose run --rm trainer python -m src.kafka_producer --dias 3` (el servicio `trainer` solo aporta la imagen con las dependencias).
+3. Para reentrenar el modelo (opcional; el repositorio ya trae uno): `docker compose run --rm trainer`.
+4. Para generar el informe estático: `docker compose run --rm report`; se escribe en `reports/analytical_report.html`.
+
+Los pasos 3 y 4 requieren que el DAG haya cargado datos al menos una vez (crean y consultan `dw.v_prediction_features`).
 
 Verificar la carga desde la terminal:
 
@@ -235,7 +357,7 @@ docker compose down        # conserva los datos
 docker compose down -v     # borra también los volúmenes
 ```
 
-## 11. Pruebas
+## 17. Pruebas
 
 Pruebas de transformaciones (incluida la extracción y limpieza de la tabla web con HTML de ejemplo), ubicaciones y extracción incremental (Python 3.14 con `uv`):
 
@@ -247,29 +369,38 @@ uv run pytest
 Pruebas de las suites de Great Expectations (incluye datos corruptos que deben bloquear la carga y la identificación de filas para cuarentena) y del DAG, dentro del contenedor:
 
 ```bash
-docker compose run --rm tests
+docker compose --profile test run --rm tests
 ```
 
-## 12. Estructura del repositorio
+Pruebas del contrato de eventos, el productor, la división por fecha, la inferencia por mensaje y el descarte de mensajes inválidos:
+
+```bash
+docker compose --profile test run --rm streaming-tests
+```
+
+## 18. Estructura del repositorio
 
 ```
 config/          configuración (config.yaml) y tabla de países a ISO3
 dags/            DAG de Airflow
-src/             extracción, transformación, unión, validación y carga
+src/             extracción, transformación, unión, validación, carga, cuarentena, modelo, productor y consumidor
 utils/           conexión, configuración y logging
 dwh_version/     DDL del Data Warehouse
 gx/              configuración y expectativas de Great Expectations
-dashboard/       aplicación de Streamlit
-notebooks/       EDA de las cuatro fuentes
+dashboard/       dashboard analítico (Streamlit)
+dashboard_realtime/  dashboard en tiempo real alimentado por el consumidor de Kafka
+models/          modelo serializado (.pkl) y metadatos
+reports/         informe estático (generador y HTML)
+notebooks/       EDA de las entregas 1 y 2 y cuaderno del modelo de predicción
 test/            pruebas unitarias
 docs/            documento técnico, diagramas y capturas
 data/raw/        copias comprimidas de los datos de origen
 data/quarantine/ filas inválidas de los lotes enviados a cuarentena (se genera al ejecutar)
-docker/          Dockerfiles de Airflow y del dashboard
+docker/          Dockerfiles de Airflow, del dashboard analítico y de streaming
 docker-compose.yml, requirements-*.txt, .env.example
 ```
 
-## 13. Decisiones clave
+## 19. Decisiones clave
 
 - **Airflow en Docker Compose con LocalExecutor**: un solo comando levanta el proyecto y es reproducible en cualquier equipo; no se necesita Celery ni Redis para este volumen.
 - **PostgreSQL parametrizado por variables de entorno**: por defecto un contenedor local, y Supabase u otro servidor cambiando solo el `.env`.
@@ -279,9 +410,22 @@ docker-compose.yml, requirements-*.txt, .env.example
 - **Ubicación canónica y tabla de países**: resuelve nombres en otros idiomas y coordenadas cambiantes en el origen.
 - **Scraping acotado a una tabla estable**: se extrae una sola tabla de una página con licencia abierta, con `User-Agent` propio y tiempo máximo de espera; si la estructura cambia, la tarea falla en lugar de cargar datos incorrectos.
 - **Datos comprimidos en el repositorio** (17 MB): para que el proyecto corra sin descargas manuales ni cuentas de terceros.
+- **Kafka en modo KRaft de un solo nodo**: cumple el caso de uso sin Zookeeper ni más contenedores; el flujo se simula leyendo la tabla de hechos.
+- **Un solo contrato de datos** (`src/ml_contract.py`) para entrenamiento, productor y consumidor: evita que cada pieza interprete las columnas distinto.
+- **Dataset de predicción como vista SQL**: el entrenamiento y el productor leen exactamente las mismas columnas del modelo dimensional.
+- **Predecir el cambio diario y comparar siempre contra "mañana = hoy"**: la línea base es fuerte; el modelo solo aporta si la supera.
+- **El consumidor valida antes de predecir**: un mensaje inválido se descarta y se cuenta, no se predice.
+- **Modelo versionado en el repositorio** (1.8 MB): el consumidor funciona tras clonar, y la imagen de streaming fija las versiones para que el `.pkl` siempre cargue.
 - **Python 3.12 en los contenedores**: Great Expectations 1.x aún no soporta Python 3.14, que se usa en el entorno local con `uv`.
 
-## 14. Solución de problemas
+## 20. Limitaciones
+- La mejora del modelo sobre la línea base de persistencia es moderada; el horizonte es de un día.
+- La simulación del flujo publica datos de la tabla de hechos con una pausa corta; no es captura de cambios (CDC) ni una plataforma de eventos de producción (un solo broker, una réplica).
+- La API gratuita tiene cuotas y es de uso no comercial; el dato web es anual y depende de una página de terceros.
+- El plan gratuito de Supabase se pausa por inactividad; por defecto el proyecto usa el PostgreSQL local del compose.
+- El consumidor guarda las predicciones y procesa de uno en uno: suficiente para ~260 ciudades por día, no para un volumen alto.
+
+## 21. Solución de problemas
 
 | Síntoma | Causa y solución |
 |---|---|
@@ -291,8 +435,12 @@ docker-compose.yml, requirements-*.txt, .env.example
 | `extract_web` falla | la página no responde o cambió la estructura de la tabla; Airflow reintenta dos veces. Si persiste, revisar la URL en `config/config.yaml` y el mensaje del log |
 | El dashboard muestra errores de conexión | esperar a que `warehouse` esté saludable (`docker compose ps`) y correr el DAG al menos una vez |
 | `no matching manifest` al construir | Docker Desktop debe usar contenedores de Linux |
+| El dashboard en tiempo real dice "Waiting for events" | el tópico está vacío o el consumidor aún se une al grupo (unos segundos); publicar con `python -m src.kafka_producer` |
+| `publish_to_kafka` falla | Kafka aún no está saludable (`docker compose ps`); Airflow reintenta dos veces |
+| El trainer o el informe dicen que no existe `v_prediction_features` | correr el DAG al menos una vez para crear el esquema `dw` |
+| `no existe models/pm25_next_day_model.pkl` | entrenar con `docker compose run --rm trainer` |
 
-## 15. Licencias y atribución de datos
+## 22. Licencias y atribución de datos
 
 - Datos meteorológicos y de calidad del aire: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0), uso no comercial.
 - Emisiones y economía: [Our World in Data, CO₂ and Greenhouse Gas Emissions](https://github.com/owid/co2-data) (CC BY 4.0).
