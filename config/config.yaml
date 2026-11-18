@@ -30,3 +30,16 @@ web:
 
 quality:
   who_pm25_24h: 15
+
+kafka:
+  bootstrap_servers: localhost:9094
+  topic: air_quality_features
+  partitions: 3
+  producer_delay_seconds: 0.05
+  consumer_group: realtime-dashboard
+
+ml:
+  model_path: models/pm25_next_day_model.pkl
+  metadata_path: models/model_metadata.json
+  test_days: 90
+  alert_threshold: 13

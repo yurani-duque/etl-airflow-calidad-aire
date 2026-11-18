@@ -8,3 +8,4 @@ great-expectations==1.23.2
 pytest
 beautifulsoup4
 lxml
+confluent-kafka
