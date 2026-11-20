@@ -311,6 +311,8 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+En Windows, el mismo recorrido se puede hacer con doble clic, sin escribir comandos: `1_PREPARAR_DEMO.cmd` levanta todo y ejecuta el DAG, `2_PUBLICAR_EVENTOS.cmd` publica eventos en Kafka, `3_ABRIR_INFORME.cmd` genera el informe y `4_APAGAR.cmd` apaga los servicios. La guía completa, con qué decir y qué hacer si algo falla, está en [`docs/GUIA_DEMOSTRACION.md`](docs/GUIA_DEMOSTRACION.md).
+
 En Windows con PowerShell, el tercer comando es `copy .env.example .env`. La primera vez tarda varios minutos porque construye las imágenes. Los valores por defecto del `.env` apuntan al PostgreSQL local del compose, así que no hay que configurar nada.
 
 Al arrancar, un servicio de preparación carga el dataset de emisiones en la base fuente y el scheduler queda activo.
